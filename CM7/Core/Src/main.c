@@ -23,12 +23,6 @@
 #include "usart.h"
 #include "gpio.h"
 
-/*++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
- * Trabalho realizado por:
- * Nuno Costa a107069
- * Afonso Carvalho a107058
- ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++*/
-
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 
@@ -88,7 +82,7 @@ int pins[16];															  //Declaração e inicialização do vetor de pinos
 volatile uint8_t ov;													  //Variável para a flag de interrupção genérica (overflow)
 
 int CS=0;
-int last_CS=0;
+//int last_CS=0;
 int EN=0;
 
 typedef enum{                           // Enumeração dos tipos de parâmetros esperados na análise sintática
@@ -106,6 +100,7 @@ typedef enum{                           // Enumeração dos tipos de parâmetros
 	DIG,
 	FLOAT,
 	SIGN,
+	UINT,
 }Type;
 
 typedef enum{							//Enumeração dos tipos de erros
@@ -234,7 +229,7 @@ void upperCase(char string[]){					//Função de uniformalização de uma string
 int pins[16]={}; 													//Declaração e inicialização do array de pinos
 int n=0; 															//Declaração e inicialização do índice do array
 
-Error validate(char par[], int digits, int type, int *out){ 		//Função para validar os parâmetros implementados pelo utilizador
+Error validate(char par[], int digits, int type, int *out, int hex){ 		//Função para validar os parâmetros implementados pelo utilizador
 	int i = 0; 														//Declaração e inicialização do iterador
 	uint32_t num = 1; 												//Declaração e inicialização do inteiro convertido da string de entrada
 	int max = 10; 													//Declaração e inicialização da variável de tamanho máximo do parâmetro de entrada
@@ -245,7 +240,11 @@ Error validate(char par[], int digits, int type, int *out){ 		//Função para va
 			if(!isxdigit(par[i])) return ERR;						//Se o utilizador escrever algo que não seja um dígito hexadecimal, retorna erro
 		}
 		max = pow(16,digits);										//Valor máximo do parâmetro
-		num = (uint32_t)strtoul(par, NULL, 16);						//Conversão da string do parâmetro para um unsigned long int
+		if(hex){
+			num = (uint32_t)strtoul(par, NULL, 16);						//Conversão da string do parâmetro para um unsigned long int decimal
+		}else{
+			num = (uint32_t)strtoul(par, NULL, 10);						//Conversão da string do parâmetro para um unsigned long int hexadecimal
+		}
 	}
 	if(num<max){													//Se o parâmetro de entrada não ultrapassa o tamanho máximo
 		switch (type){												//Diferentes casos
@@ -299,12 +298,15 @@ Error validate(char par[], int digits, int type, int *out){ 		//Função para va
 				*out = 1;
 				break;
 			case '-':
-				*out = -1;
+				*out = 0;
 				break;
 			default:
-				return ERR;
+				return -1;
 				break;
 			}
+			break;
+		case UINT:													//Parâmetro inteiro genérico (Endereços, Tamanhos)
+			*out = num;												//O endereço da string de saída toma o valor de num
 			break;
 		default:
 			return ERR;                                     		//Se não tivermos nenhum dos casos anteriores, dá erro genérico
@@ -329,8 +331,8 @@ Tokens identify(char *in[MAX_STRING], int count){								//Função de análise 
 		if(count==3){															//Verificação do número de parâmetros
 			char *addrStr = in[1];												//Declaração e inicialização da string do endereço da memória
 			char *lenStr = in[2];												//Declaração e inicialização da string do nº de bytes
-			if((validate(addrStr, 4, INT, &(out.data[1])))						//Validação do endereço, com 4 dígitos, sendo inteira
-					||(validate(lenStr, 2, INT, &(out.data[2])))){				//Validação do comprimento, com 2 dígitos, sendo inteira
+			if((validate(addrStr, 4, INT, &(out.data[1]), 1))						//Validação do endereço, com 4 dígitos, sendo inteira
+					||(validate(lenStr, 2, INT, &(out.data[2]), 1))){				//Validação do comprimento, com 2 dígitos, sendo inteira
 				out.state = ERR_PAR;											//Se a validação der errado, estamos com erro de parâmetros
 				return out;														//Retorna o erro de parâmetros na string de saída
 			}
@@ -347,9 +349,9 @@ Tokens identify(char *in[MAX_STRING], int count){								//Função de análise 
 			char *addrStr = in[1];												//Declaração e inicialização da string do endereço de memória
 			char *lenStr = in[2];												//Declaração e inicialização da string do nº de bytes
 			char *byteStr = in[3];												//Declaração e inicialização da string do valor do byte
-			if((validate(addrStr, 4, INT, &(out.data[1])))						//Validação do endereço, com 4 dígitos, sendo inteiro
-					||(validate(lenStr, 2, INT, &(out.data[2])))				//Validação do comprimento, com 2 dígitos, sendo inteiro
-						||(validate(byteStr, 2, INT, &(out.data[3])))){     	//Validação do valor, com 2 dígitos, sendo inteiro
+			if((validate(addrStr, 4, INT, &(out.data[1]), 1))						//Validação do endereço, com 4 dígitos, sendo inteiro
+					||(validate(lenStr, 2, INT, &(out.data[2]), 1))				//Validação do comprimento, com 2 dígitos, sendo inteiro
+						||(validate(byteStr, 2, INT, &(out.data[3]), 1))){     	//Validação do valor, com 2 dígitos, sendo inteiro
 				out.state = ERR_PAR;											//Se a validação der errado, estamos com erro de parâmetros
 				return out;														//Retorna o erro de parâmetros na string de saída
 			}
@@ -365,8 +367,8 @@ Tokens identify(char *in[MAX_STRING], int count){								//Função de análise 
 		if(count==3){															//Verificação do número de parâmetros
 			char *portStr = in[1];												//Declaração e inicialização da string do endereço da porta
 			char *pinStr = in[2];												//Declaração e inicialização da string do mapa de pinos
-			if((validate(portStr, 1, CHAR, &(out.data[1])))						//Validação da porta, com 1 dígito, sendo um caractere (uma letra)
-					||(validate(pinStr, 4, PIN, &(out.data[2])))){ 				//Validação dos pinos, com 4 dígitos, sendo a lista dos pinos
+			if((validate(portStr, 1, CHAR, &(out.data[1]), 1))						//Validação da porta, com 1 dígito, sendo um caractere (uma letra)
+					||(validate(pinStr, 4, PIN, &(out.data[2]), 1))){ 				//Validação dos pinos, com 4 dígitos, sendo a lista dos pinos
 				out.state = ERR_PAR;											//Se a validação der errado, estamos com erro de parâmetros
 				return out;														//Retorna o erro de parâmetros na string de saída
 			}
@@ -382,8 +384,8 @@ Tokens identify(char *in[MAX_STRING], int count){								//Função de análise 
 		if(count==3){															//Verificação do número de parâmetros
 			char *portStr = in[1];												//Declaração e inicialização da string do endereço da porta
 			char *pinStr = in[2];												//Declaração e inicialização da string do mapa de pinos
-			if((validate(portStr, 1, CHAR, &(out.data[1])))						//Validação da porta, com 1 dígito, sendo um caractere (uma letra)
-					||(validate(pinStr, 4, PIN, &(out.data[2])))){				//Validação dos pinos, com 4 dígitos, sendo a lista de pinos
+			if((validate(portStr, 1, CHAR, &(out.data[1]), 1))						//Validação da porta, com 1 dígito, sendo um caractere (uma letra)
+					||(validate(pinStr, 4, PIN, &(out.data[2]), 1))){				//Validação dos pinos, com 4 dígitos, sendo a lista de pinos
 				out.state = ERR_PAR;											//Se a validação der errado, estamos com erro de parâmetros
 				return out;														//Retorna o erro de parâmetros na string de saída
 			}
@@ -399,8 +401,8 @@ Tokens identify(char *in[MAX_STRING], int count){								//Função de análise 
 		if(count==3){															//Verificação do número de parâmetros
 			char *portStr = in[1];												//Declaração e inicialização da string do endereço da porta
 			char *pinStr = in[2];												//Declaração e inicialização da string do mapa de pinos
-			if((validate(portStr, 1, CHAR, &(out.data[1])))						//Validação da porta, com 1 dígito, sendo um caractere (uma letra)
-					||(validate(pinStr, 4, PIN, &(out.data[2])))){  			//Validação dos pinos, com 4 dígitos, sendo a lista de pinos
+			if((validate(portStr, 1, CHAR, &(out.data[1]), 1))						//Validação da porta, com 1 dígito, sendo um caractere (uma letra)
+					||(validate(pinStr, 4, PIN, &(out.data[2]), 1))){  			//Validação dos pinos, com 4 dígitos, sendo a lista de pinos
 				out.state = ERR_PAR;											//Se a validação der errado, estamos com erro de parâmetros
 				return out;														//Retorna o erro de parâmetros na string de saída
 			}
@@ -417,9 +419,9 @@ Tokens identify(char *in[MAX_STRING], int count){								//Função de análise 
 			char *portStr = in[1];												//Declaração e inicialização da string do endereço da porta
 			char *pinStr = in[2];												//Declaração e inicialização da string do mapa de pinos
 			char *valStr = in[3];												//Declaração e inicialização da string do valor do pino
-			if((validate(portStr, 1, CHAR, &(out.data[1])))						//Validação da porta, com 1 dígito, sendo um caractere (uma letra)
-					||(validate(pinStr, 4, PIN, &(out.data[2])))				//Validação dos pinos, com 4 dígitos, sendo alista de pinos
-						||(validate(valStr, 4, BIN, &(out.data[3])))){			//Validação dos valores, com 4 dígitos, sendo os valores lógicos dos pinos
+			if((validate(portStr, 1, CHAR, &(out.data[1]), 1))						//Validação da porta, com 1 dígito, sendo um caractere (uma letra)
+					||(validate(pinStr, 4, PIN, &(out.data[2]), 1))				//Validação dos pinos, com 4 dígitos, sendo alista de pinos
+						||(validate(valStr, 4, BIN, &(out.data[3]), 1))){			//Validação dos valores, com 4 dígitos, sendo os valores lógicos dos pinos
 				out.state = ERR_PAR;											//Se a validação der errado, estamos com erro de parâmetros
 				return out;														//Retorna o erro de parâmetros na string de saída
 			}
@@ -434,7 +436,7 @@ Tokens identify(char *in[MAX_STRING], int count){								//Função de análise 
 		out.data[0] = CMD_PWMS;													//Ativa o comando PULSE WIDTH MODULATION
 		if(count==2){															//Verificação do número de parâmetros
 			char *dutyStr = in[1];												//Declaração e inicialização da string do duty-cycle
-			if(validate(dutyStr, 2,INT, &(out.data[1]))){						//Validação do duty-cycle, com 2 dígitos,em uma variável inteira
+			if(validate(dutyStr, 2,INT, &(out.data[1]), 1)){						//Validação do duty-cycle, com 2 dígitos,em uma variável inteira
 				out.state = ERR_PAR;											//Se a validação der errado, estamos com erro de parâmetros
 				return out;														//Retorna o erro de parâmetros na string de saída
 			}
@@ -448,7 +450,7 @@ Tokens identify(char *in[MAX_STRING], int count){								//Função de análise 
 		out.data[0] = CMD_RA;													//Ativa o comando ANALOG READ
 		if(count==2){															//Verificação do número de parâmetros
 			char *addrStr = in[1];												//Declaração e inicialização da string do endereço do canal 3 do ADC
-			if(validate(addrStr, 1, INT, &(out.data[1]))){						//Validação do endereço, com 1 dígito, sendo inteiro
+			if(validate(addrStr, 1, INT, &(out.data[1]), 1)){						//Validação do endereço, com 1 dígito, sendo inteiro
 				out.state = ERR_PAR;											//Se a validação der errado, estamos com erro de parâmetros
 				return out;														//Retorna o erro de parâmetros na string de saída
 			}
@@ -462,7 +464,7 @@ Tokens identify(char *in[MAX_STRING], int count){								//Função de análise 
 		out.data[0] = CMD_CS;													//Ativa o comando ANALOG READ
 		if(count==2){															//Verificação do número de parâmetros
 			char *digitStr = in[1];												//Declaração e inicialização da string do endereço do canal 3 do ADC
-			if(validate(digitStr, 1, DIG, &(out.data[1]))){						//Validação do endereço, com 1 dígito, sendo inteiro
+			if(validate(digitStr, 1, DIG, &(out.data[1]), 0)){						//Validação do endereço, com 1 dígito, sendo inteiro
 				out.state = ERR_PAR;											//Se a validação der errado, estamos com erro de parâmetros
 				return out;														//Retorna o erro de parâmetros na string de saída
 			}
@@ -475,7 +477,7 @@ Tokens identify(char *in[MAX_STRING], int count){								//Função de análise 
 		out.data[0] = CMD_EN;													//Ativa o comando ANALOG READ
 		if(count==2){															//Verificação do número de parâmetros
 			char *digitStr = in[1];												//Declaração e inicialização da string do endereço do canal 3 do ADC
-			if(validate(digitStr, 1, DIG, &(out.data[1]))){						//Validação do endereço, com 1 dígito, sendo inteiro
+			if(validate(digitStr, 1, DIG, &(out.data[1]), 0)){						//Validação do endereço, com 1 dígito, sendo inteiro
 				out.state = ERR_PAR;											//Se a validação der errado, estamos com erro de parâmetros
 				return out;														//Retorna o erro de parâmetros na string de saída
 			}
@@ -488,7 +490,7 @@ Tokens identify(char *in[MAX_STRING], int count){								//Função de análise 
 		out.data[0] = CMD_HW;													//Ativa o comando ANALOG READ
 		if(count==2){															//Verificação do número de parâmetros
 			char *digitStr = in[1];												//Declaração e inicialização da string do endereço do canal 3 do ADC
-			if(validate(digitStr, 4, INT, &(out.data[1]))){						//Validação do endereço, com 1 dígito, sendo inteiro
+			if(validate(digitStr, 4, UINT, &(out.data[1]), 0)){						//Validação do endereço, com 1 dígito, sendo inteiro
 				out.state = ERR_PAR;											//Se a validação der errado, estamos com erro de parâmetros
 				return out;														//Retorna o erro de parâmetros na string de saída
 			}
@@ -501,7 +503,7 @@ Tokens identify(char *in[MAX_STRING], int count){								//Função de análise 
 		out.data[0] = CMD_RT;													//Ativa o comando ANALOG READ
 		if(count==2){															//Verificação do número de parâmetros
 			char *digitStr = in[1];												//Declaração e inicialização da string do endereço do canal 3 do ADC
-			if(validate(digitStr, 1, DIG, &(out.data[1]))){						//Validação do endereço, com 1 dígito, sendo inteiro
+			if(validate(digitStr, 1, DIG, &(out.data[1]), 0)){						//Validação do endereço, com 1 dígito, sendo inteiro
 				out.state = ERR_PAR;											//Se a validação der errado, estamos com erro de parâmetros
 				return out;														//Retorna o erro de parâmetros na string de saída
 			}
@@ -515,8 +517,8 @@ Tokens identify(char *in[MAX_STRING], int count){								//Função de análise 
 		if(count==3){															//Verificação do número de parâmetros
 			char *digitStr = in[1];												//Declaração e inicialização da string do endereço do canal 3 do ADC
 			char *unitStr = in[2];
-			if((validate(digitStr, 1, DIG, &(out.data[1])))
-					||(validate(unitStr, 4, INT, &(out.data[2])))){						//Validação do endereço, com 1 dígito, sendo inteiro
+			if((validate(digitStr, 1, DIG, &(out.data[1]), 0))
+					||(validate(unitStr, 4, UINT, &(out.data[2]), 0))){						//Validação do endereço, com 1 dígito, sendo inteiro
 				out.state = ERR_PAR;											//Se a validação der errado, estamos com erro de parâmetros
 				return out;														//Retorna o erro de parâmetros na string de saída
 			}
@@ -540,8 +542,8 @@ Tokens identify(char *in[MAX_STRING], int count){								//Função de análise 
 				strcpy(digitStr,in[1]);
 			}
 														//Declaração e inicialização da string do endereço do canal 3 do ADC
-			if((validate(signStr, 1, SIGN, &(out.data[1])))
-					||(validate(digitStr, 3, INT, &(out.data[2])))){						//Validação do endereço, com 1 dígito, sendo inteiro
+			if((validate(signStr, 1, SIGN, &(out.data[1]), 0))
+					||(validate(digitStr, 3, UINT, &(out.data[2]), 0))){						//Validação do endereço, com 1 dígito, sendo inteiro
 				out.state = ERR_PAR;											//Se a validação der errado, estamos com erro de parâmetros
 				return out;														//Retorna o erro de parâmetros na string de saída
 			}
@@ -563,8 +565,8 @@ Tokens identify(char *in[MAX_STRING], int count){								//Função de análise 
 		if(count==3){															//Verificação do número de parâmetros
 			char *digitStr = in[1];												//Declaração e inicialização da string do endereço do canal 3 do ADC
 			char *floatStr = in[2];
-			if((validate(digitStr, 1, DIG, &(out.data[1])))
-					||(validate(floatStr, 3, FLOAT, &(out.data[2])))){						//Validação do endereço, com 1 dígito, sendo inteiro
+			if((validate(digitStr, 1, DIG, &(out.data[1]), 0))
+					||(validate(floatStr, 3, FLOAT, &(out.data[2]), 0))){						//Validação do endereço, com 1 dígito, sendo inteiro
 				out.state = ERR_PAR;											//Se a validação der errado, estamos com erro de parâmetros
 				return out;														//Retorna o erro de parâmetros na string de saída
 			}
@@ -902,7 +904,13 @@ void execute(Tokens in){ //Função execute
 					"Define o estado como %d", in.data[1]);
 			print(resposta);
 			if(in.data[1]<=3){
-				CS = in.data[1];
+				if((CS==2)&&(in.data[1]!=3)||(CS==3)&&(in.data[1]!=2)||(CS==1)){
+					CS = in.data[1];
+				}else{
+					snprintf(resposta, MAX_OUT,	//Apresentação da resposta ao comando
+							"\nERRO DE ESTADO!");
+					print(resposta);
+				}
 			}else{
 				snprintf(resposta, MAX_OUT,	//Apresentação da resposta ao comando
 						"\nERRO DE VALOR!");
@@ -917,6 +925,18 @@ void execute(Tokens in){ //Função execute
 			if(!check_state(en)){
 				if(in.data[1]<=1){
 					EN = in.data[1];
+					if(EN){
+						HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
+						HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_2);
+						HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_3);
+					}else{
+						HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_1);
+						HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_2);
+						HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_3);
+					}
+					//HAL_GPIO_WritePin(GPIOB, GPIO_PIN_MOTOR, (EN==1) ? GPIO_PIN_SET : GPIO_PIN_RESET);
+					snprintf(resposta, MAX_OUT, "\nMotores %s", (EN==1) ? "ATIVADOS" : "DESATIVADOS");
+					print(resposta);
 				}else{
 					snprintf(resposta, MAX_OUT,	//Apresentação da resposta ao comando
 							"\nERRO DE VALOR!");
@@ -987,12 +1007,19 @@ void execute(Tokens in){ //Função execute
 			break;
 		case CMD_PWM:									//
 			snprintf(resposta, MAX_OUT,					//Apresentação da resposta ao comando
-					"Define o PWM como %d%% com o sinal %d", in.data[2],in.data[1]);
+					"Define o PWM como %d%% com o direcao %c", in.data[2],(in.data[1])?'+':'-');
 			print(resposta);
 			int pwm[]={1,2,-1,-1};
 			if(!check_state(pwm)){
 				if(abs(in.data[2])<=100){
-					//EN = in.data[1];
+					int pwm=(in.data[2]*__HAL_TIM_GET_AUTORELOAD(&htim3))/100;
+					if(in.data[1]) { // Forward
+						__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, pwm); // Canal Direção +
+					    __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, 0);   // Canal Direção -
+					} else { // Reverse
+					    __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 0);
+					    __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, pwm);
+					}
 				}else{
 					snprintf(resposta, MAX_OUT,	//Apresentação da resposta ao comando
 							"\nERRO DE VALOR!");
@@ -1069,13 +1096,13 @@ void execute(Tokens in){ //Função execute
 }
 //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-void main_loop(void){
+int main_loop(void){
 	if(data_ready == 1){ 								//Verifica se a flag de receção foi ativada
 		upperCase(input);								//Se foi, garante que todos os comandos recebidos ficam apenas em maiúsculas (por causa do Case Sensitivity)
 		// 1. parse(): Divide a string em tokens e valida a sintaxe (Análise Léxica/Sintática)
 		// 2. execute(): Recebe o resultado do parse e atua no hardware (Semântica/Execução)
 		execute(parse(input, delim));
-		print("\n[MANUAL]>");									// Imprime o prompt para indicar ao utilizador que o sistema está pronto para o próximo comando
+		//print("\n[MANUAL]>");									// Imprime o prompt para indicar ao utilizador que o sistema está pronto para o próximo comando
 		//Limpeza e Preparação para o próximo ciclo
 		data_ready = 0;								//Reset da flag de receção
 		memset(input, 0, MAX_CHAR); 					//Limpa o buffer de entrada para evitar resíduos de comandos anteriores (por segurança)
@@ -1084,18 +1111,20 @@ void main_loop(void){
 		 __HAL_UART_CLEAR_OREFLAG(&huart3);		//Limpa o erro de Overrun para desbloquear o periférico
 		 start_scan(input);						// Segunda tentativa de arranque após limpeza do erro
 		}
+		return 1;
 	}
 	if (ov){											// Verifica se a flag de overflow está ativa
 		ov = 0;									// Reset da flag (acknowledge)
 	  	HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_0);	// Indicação visual que o código não "encravou" e o loop principal continua a correr
 	}
+	return 0;
 }
 //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 void state_machine(){
 	switch(CS){
 	case 0:				//Reset
-		print("\nRESET---------------------");
+		print("\n\nRESET- - - - - - - - - - -");
 		/*
 		Desativa os pinos de enable, de definição de sentido de rotação e de sinal de PWM;
 		Modo de limpeza das configurações iniciais do utilizador (período de amostragem – 10 ms; tipo de leitura - leitura de posição; reset de posição, PWM - duty cycle 0%, valores dos parâmetros PID – todos a zero);
@@ -1103,12 +1132,10 @@ void state_machine(){
 		Transição de estado: o estado 0 deve ser transitório, passando para o estado 1 (modo de configuração) após o reset das variáveis ser concluído.
 		*/
 		EN = 0;
-
-
 		CS = 1;
 		break;
 	case 1:				//Config
-		print("\nCONFIG---------------------");
+		print("\n\nCONFIG- - - - - - - - - - -");
 		print("\n[CONFIG]>");
 		/*
 		Este modo serve para o utilizador configurar diferentes variáveis necessárias para o controlo:
@@ -1129,11 +1156,13 @@ void state_machine(){
 //		}
 		EN = 0;
 		while (CS==1){
-			main_loop();
+			if(main_loop()){
+			print("\n[CONFIG]>");
+			}
 		}
 		break;
 	case 2:				//Manual
-		print("\nMANUAL---------------------");
+		print("\n\nMANUAL- - - - - - - - - - -");
 		print("\n[MANUAL]>");
 		/*
 		Este modo serve para leitura de posição e velocidade angular a partir dos valores do encoder (funções a definir no objetivo 2) e para manipulação contínua e direta do sinal de PWM (funções a definir no objetivo 3);
@@ -1152,12 +1181,13 @@ void state_machine(){
 //
 //		}
 		while (CS==2){
-			main_loop();
-			if(CS!=2) break;
+			if(main_loop()){
+			print("\n[MANUAL]>");
+			}
 		}
 		break;
 	case 3:				//Auto
-		print("\nAUTO---------------------");
+		print("\n\nAUTO- - - - - - - - - - -");
 		print("\n[AUTO]>");
 		/*
 		Este modo visa o teste do controlo do disco usando o controlo PID implementado. O programa a realizar para este estado será definido no objetivo 6;
@@ -1177,7 +1207,12 @@ void state_machine(){
 //		}
 		EN=1;
 		while (CS==3){
-			main_loop();
+			if(main_loop()){
+			print("\n[AUTO]>");
+			}
+			if(!EN){
+				CS=1;
+			}
 		}
 		break;
 	default:			//Safety
@@ -1258,8 +1293,8 @@ Error_Handler();
   //printf(">");
   start_scan(input);									//Início da receção pela usart3
   //uint16_t next_CCR = TIM3_CCR;
-  __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, 0);    //Define o valor inicial do Duty Cycle para 0 (0%)
-  HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_3);			//Ativa efetivamente a geração do sinal PWM no pino físico
+  //__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, 0);    //Define o valor inicial do Duty Cycle para 0 (0%)
+  //(&htim3, TIM_CHANNEL_3);			//Ativa efetivamente a geração do sinal PWM no pino físico
   //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
   /* USER CODE END 2 */
 
@@ -1398,4 +1433,3 @@ void assert_failed(uint8_t *file, uint32_t line)
   /* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */
-
