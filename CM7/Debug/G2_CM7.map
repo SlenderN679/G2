@@ -7501,32 +7501,32 @@ LOAD C:/ST/STM32CubeIDE_1.16.1/STM32CubeIDE/plugins/com.st.stm32cube.ide.mcu.ext
  .debug_macro   0x0003df23      0x2f6 ./Drivers/STM32H7xx_HAL_Driver/stm32h7xx_hal_uart.o
  .debug_macro   0x0003e219      0x2d7 ./Drivers/STM32H7xx_HAL_Driver/stm32h7xx_hal_uart_ex.o
 
-.debug_line     0x00000000    0x2048f
+.debug_line     0x00000000    0x20497
  .debug_line    0x00000000      0xb44 ./Common/Src/system_stm32h7xx_dualcore_boot_cm4_cm7.o
  .debug_line    0x00000b44      0x9e5 ./Core/Src/adc.o
  .debug_line    0x00001529      0x953 ./Core/Src/gpio.o
- .debug_line    0x00001e7c     0x1742 ./Core/Src/main.o
- .debug_line    0x000035be      0x937 ./Core/Src/stm32h7xx_hal_msp.o
- .debug_line    0x00003ef5      0xa2a ./Core/Src/stm32h7xx_it.o
- .debug_line    0x0000491f      0x8b2 ./Core/Src/syscalls.o
- .debug_line    0x000051d1      0x583 ./Core/Src/sysmem.o
- .debug_line    0x00005754      0xa15 ./Core/Src/tim.o
- .debug_line    0x00006169      0x9db ./Core/Src/usart.o
- .debug_line    0x00006b44       0x7a ./Core/Startup/startup_stm32h755zitx.o
- .debug_line    0x00006bbe     0x1074 ./Drivers/STM32H7xx_HAL_Driver/stm32h7xx_hal.o
- .debug_line    0x00007c32     0x2464 ./Drivers/STM32H7xx_HAL_Driver/stm32h7xx_hal_adc.o
- .debug_line    0x0000a096     0x2062 ./Drivers/STM32H7xx_HAL_Driver/stm32h7xx_hal_adc_ex.o
- .debug_line    0x0000c0f8      0xf50 ./Drivers/STM32H7xx_HAL_Driver/stm32h7xx_hal_cortex.o
- .debug_line    0x0000d048     0x2878 ./Drivers/STM32H7xx_HAL_Driver/stm32h7xx_hal_dma.o
- .debug_line    0x0000f8c0      0xded ./Drivers/STM32H7xx_HAL_Driver/stm32h7xx_hal_gpio.o
- .debug_line    0x000106ad      0xadd ./Drivers/STM32H7xx_HAL_Driver/stm32h7xx_hal_hsem.o
- .debug_line    0x0001118a     0x1155 ./Drivers/STM32H7xx_HAL_Driver/stm32h7xx_hal_pwr_ex.o
- .debug_line    0x000122df     0x14e5 ./Drivers/STM32H7xx_HAL_Driver/stm32h7xx_hal_rcc.o
- .debug_line    0x000137c4     0x1e15 ./Drivers/STM32H7xx_HAL_Driver/stm32h7xx_hal_rcc_ex.o
- .debug_line    0x000155d9     0x40ab ./Drivers/STM32H7xx_HAL_Driver/stm32h7xx_hal_tim.o
- .debug_line    0x00019684     0x1eb5 ./Drivers/STM32H7xx_HAL_Driver/stm32h7xx_hal_tim_ex.o
- .debug_line    0x0001b539     0x3fa3 ./Drivers/STM32H7xx_HAL_Driver/stm32h7xx_hal_uart.o
- .debug_line    0x0001f4dc      0xfb3 ./Drivers/STM32H7xx_HAL_Driver/stm32h7xx_hal_uart_ex.o
+ .debug_line    0x00001e7c     0x174a ./Core/Src/main.o
+ .debug_line    0x000035c6      0x937 ./Core/Src/stm32h7xx_hal_msp.o
+ .debug_line    0x00003efd      0xa2a ./Core/Src/stm32h7xx_it.o
+ .debug_line    0x00004927      0x8b2 ./Core/Src/syscalls.o
+ .debug_line    0x000051d9      0x583 ./Core/Src/sysmem.o
+ .debug_line    0x0000575c      0xa15 ./Core/Src/tim.o
+ .debug_line    0x00006171      0x9db ./Core/Src/usart.o
+ .debug_line    0x00006b4c       0x7a ./Core/Startup/startup_stm32h755zitx.o
+ .debug_line    0x00006bc6     0x1074 ./Drivers/STM32H7xx_HAL_Driver/stm32h7xx_hal.o
+ .debug_line    0x00007c3a     0x2464 ./Drivers/STM32H7xx_HAL_Driver/stm32h7xx_hal_adc.o
+ .debug_line    0x0000a09e     0x2062 ./Drivers/STM32H7xx_HAL_Driver/stm32h7xx_hal_adc_ex.o
+ .debug_line    0x0000c100      0xf50 ./Drivers/STM32H7xx_HAL_Driver/stm32h7xx_hal_cortex.o
+ .debug_line    0x0000d050     0x2878 ./Drivers/STM32H7xx_HAL_Driver/stm32h7xx_hal_dma.o
+ .debug_line    0x0000f8c8      0xded ./Drivers/STM32H7xx_HAL_Driver/stm32h7xx_hal_gpio.o
+ .debug_line    0x000106b5      0xadd ./Drivers/STM32H7xx_HAL_Driver/stm32h7xx_hal_hsem.o
+ .debug_line    0x00011192     0x1155 ./Drivers/STM32H7xx_HAL_Driver/stm32h7xx_hal_pwr_ex.o
+ .debug_line    0x000122e7     0x14e5 ./Drivers/STM32H7xx_HAL_Driver/stm32h7xx_hal_rcc.o
+ .debug_line    0x000137cc     0x1e15 ./Drivers/STM32H7xx_HAL_Driver/stm32h7xx_hal_rcc_ex.o
+ .debug_line    0x000155e1     0x40ab ./Drivers/STM32H7xx_HAL_Driver/stm32h7xx_hal_tim.o
+ .debug_line    0x0001968c     0x1eb5 ./Drivers/STM32H7xx_HAL_Driver/stm32h7xx_hal_tim_ex.o
+ .debug_line    0x0001b541     0x3fa3 ./Drivers/STM32H7xx_HAL_Driver/stm32h7xx_hal_uart.o
+ .debug_line    0x0001f4e4      0xfb3 ./Drivers/STM32H7xx_HAL_Driver/stm32h7xx_hal_uart_ex.o
 
 .debug_str      0x00000000   0x19db66
  .debug_str     0x00000000   0x193661 ./Common/Src/system_stm32h7xx_dualcore_boot_cm4_cm7.o

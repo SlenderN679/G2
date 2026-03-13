@@ -81,9 +81,9 @@ volatile uint8_t data_ready = 0;										  //Declaração e inicialização da 
 int pins[16];															  //Declaração e inicialização do vetor de pinos ativos pelos comandos
 volatile uint8_t ov;													  //Variável para a flag de interrupção genérica (overflow)
 
-int CS=0;
+int CS=0;																  //Variável de estado do Sistema de Controlo (0:Reset, 1:Config, 2:Manual, 3:Auto)
 //int last_CS=0;
-int EN=0;
+int EN=0;																  //Variável de ativação (Enable) dos motores (0: Desligado, 1: Ligado)
 
 typedef enum{                           // Enumeração dos tipos de parâmetros esperados na análise sintática
     /*HEX = 0,                          // Parâmetro hexadecimal
@@ -97,10 +97,10 @@ typedef enum{                           // Enumeração dos tipos de parâmetros
     PIN,                                // Parâmetro hexadecimal, representando o mapa dos pinos (ex: o mapa de pinos para PI/PO/RD/WD)
     BIN,                                // Parâmetro hexadecimal, representando os valores lógicos (ex: os valores dos pinos para WD)
     CHAR,                               // Parâmetro caractere (ex: identificação da porta 'A', 'B', 'C', 'D', 'E', 'F' e 'G')
-	DIG,
-	FLOAT,
-	SIGN,
-	UINT,
+	DIG,								// Dígito único (0-9, sendo usado em comandos como CS ou RT
+	FLOAT,								// Valor decimal (ex: 3.4), sendo usado para os ganhos do PID (Kp, Ki, Kd)
+	SIGN,								// Sinal de operação (unsigned/signed), usado no comando de PWM
+	UINT,								// Valor inteiro de 16 bits (0-65536), usado para o período de amostragem (HW)
 }Type;
 
 typedef enum{							//Enumeração dos tipos de erros
@@ -108,7 +108,7 @@ typedef enum{							//Enumeração dos tipos de erros
 	ERR,								//Erro genérico
 	ERR_CMD,							//Erro de comando
 	ERR_PAR,							//Erro de parâmetro
-	ERR_OVR,								//Erro de overflow
+	ERR_OVR,							//Erro de overflow
 	//ERR_STATE,
 }Error;
 
@@ -122,14 +122,14 @@ typedef enum{							//Enumeração dos tipos de comandos a usar
 	CMD_PWMS,							//Comando Pulse Width Modulation
 	CMD_RA,								//Comando Analog Read
 	CMD_HELP,							//Comando Help
-	CMD_CS,
-	CMD_EN,
-	CMD_HW,
-	CMD_RT,
-	CMD_R,
-	CMD_PWM,
-	CMD_RESPOS,
-	CMD_PID,
+	CMD_CS,								//Comando Control System
+	CMD_EN,								//Comando Enable dos Motores
+	CMD_HW,								//Comando do período de amostragem
+	CMD_RT,								//Comando de configuração do tipo de leitura
+	CMD_R,								//Comando de leitura
+	CMD_PWM,							//Comando do PWM (tensão normalizada)
+	CMD_RESPOS,							//Comando de reinicialização da posição 0 do disco
+	CMD_PID,							//Comando de configuração de variáveis e parâmetros do controlador PID
 }Cmd;
 
 typedef struct {                        // Estrutura gerada pelo analisador léxico/sintático (parser)
@@ -241,9 +241,9 @@ Error validate(char par[], int digits, int type, int *out, int hex){ 		//Funçã
 		}
 		max = pow(16,digits);										//Valor máximo do parâmetro
 		if(hex){
-			num = (uint32_t)strtoul(par, NULL, 16);						//Conversão da string do parâmetro para um unsigned long int decimal
+			num = (uint32_t)strtoul(par, NULL, 16);						//Conversão da string para um valor numérico usando a base 16 (Hexadecimal)
 		}else{
-			num = (uint32_t)strtoul(par, NULL, 10);						//Conversão da string do parâmetro para um unsigned long int hexadecimal
+			num = (uint32_t)strtoul(par, NULL, 10);						//Conversão da string para um valor numérico usando a base 10 (Decimal)
 		}
 	}
 	if(num<max){													//Se o parâmetro de entrada não ultrapassa o tamanho máximo
@@ -266,47 +266,48 @@ Error validate(char par[], int digits, int type, int *out, int hex){ 		//Funçã
 			*out = num;												//O endereço da string de saída toma o valor de num
 			break;
 		case CHAR:                                          		// Identificador da porta ('A' até 'Z')
-		    if(par[1] != '\0') return ERR;                  // Garante que é apenas um caractere
-		    if(par[0] < 'A' || par[0] > 'Z') return ERR;    // Valida se está no intervalo ASCII de letras maiúsculas
-		    *out = par[0];                                  //Novo valor do endereço da string de saída
+		    if(par[1] != '\0') return ERR;                  		// Garante que é apenas um caractere
+		    if(par[0] < 'A' || par[0] > 'Z') return ERR;    		// Valida se está no intervalo ASCII de letras maiúsculas
+		    *out = par[0];                                  		//Novo valor do endereço da string de saída
 		    break;
 		case DIG:
-			if(num < 10){
-				*out = num;
+			if(num < 10){											// Valida se o número é um dígito único (0 a 9)
+				*out = num;											// Atribui o valor convertido à variável de saída
 				break;
 			}
-			return ERR;
+			return ERR;												// Retorna erro se o parâmetro tiver mais do que um dígito
 			break;
 		case FLOAT:
-			if((par[1]!='.') && (par[1]!=',')) return ERR;
-			for(i=0; i<digits; i+=2){									//Ciclo para verificação dos dígitos
+			if((par[1]!='.') && (par[1]!=',')) return ERR;				// Verifica se o segundo caractere é um separador decimal válido (. ou ,)
+			for(i=0; i<digits; i+=2){									// Ciclo de validação de caracteres (garante que são dígitos antes de converter)
 				if(par[i]=='\0') break;									//Se a string não utilizar todos os caracteres disponíveis, acaba o ciclo
-				if(!isxdigit(par[i])) return ERR;						//Se o utilizador escrever algo que não seja um dígito hexadecimal, retorna erro
-				if((uint32_t)strtoul(par[i], NULL, 16)>9) return ERR;						//Se o utiliz, retorna erro
+				if(!isxdigit(par[i])) return ERR;						//Se o utilizador escrever algo que não seja um dígito, retorna erro
+				if((uint32_t)strtoul(par[i], NULL, 16)>9) return ERR;	//Se o utilizador puser um número float cujos dígitos não estejam entre 0 e 9, retorna erro(não dá a conversão para um número unsigned int)
 			}
-			int uniF = par[0]-'0';
-			int decF = par[2]-'0';
-			num = uniF*10 + decF;
-			*out = num;
+			// Conversão "manual" da string fixa (x.y) para um inteiro representativo
+			int uniF = par[0]-'0';										// Converte o caractere da unidade em valor inteiro
+			int decF = par[2]-'0';										// Converte o caractere da décima em valor inteiro
+			num = uniF*10 + decF;										// Armazena como valor fixo (ex: 3.4 vira 34) para facilitar os cálculos
+			*out = num;													// Atribui o valor convertido à variável de saída
 			break;
-		case SIGN:
+		case SIGN:														// Interpretação do sentido de rotação ou do sinal para o PWM
 			switch(par[0]){
-			case ' ':
+			case ' ':													// Espaço tratado como positivo por defeito
 				*out = 1;
 				break;
-			case '+':
+			case '+':													// Sinal positivo
 				*out = 1;
 				break;
-			case '-':
+			case '-':													// Sinal negativo (sentido inverso)
 				*out = 0;
 				break;
-			default:
+			default:													// Caractere inválido
 				return -1;
 				break;
 			}
 			break;
-		case UINT:													//Parâmetro inteiro genérico (Endereços, Tamanhos)
-			*out = num;												//O endereço da string de saída toma o valor de num
+		case UINT:													// Para parâmetros inteiros genéricos (endereços ou o HW)
+			*out = num;												// Atribui diretamente o valor convertido anteriormente
 			break;
 		default:
 			return ERR;                                     		//Se não tivermos nenhum dos casos anteriores, dá erro genérico
@@ -432,7 +433,7 @@ Tokens identify(char *in[MAX_STRING], int count){								//Função de análise 
 		out.state = ERR_PAR;													//Se a validação der errado, estamos com erro de parâmetros
 		return out;																//Retorna o erro de parâmetros na string de saída
 
-	}else if(strcmp(in[0], "PWMS") == 0){										////Verificação se é o comando de PWM
+	}else if(strcmp(in[0], "PWMS") == 0){										////Verificação se é o comando de PWMS
 		out.data[0] = CMD_PWMS;													//Ativa o comando PULSE WIDTH MODULATION
 		if(count==2){															//Verificação do número de parâmetros
 			char *dutyStr = in[1];												//Declaração e inicialização da string do duty-cycle
@@ -459,12 +460,40 @@ Tokens identify(char *in[MAX_STRING], int count){								//Função de análise 
 		}
 		out.state = ERR_PAR;													//Se a validação der errado, estamos com erro de parâmetros
 		return out;																//Retorna o erro de parâmetros na string de saída
-	//--------------------------------
-	}else if (strcmp(in[0], "CS") == 0){											////Verificação se é o comando de leitura analógica do ADC (Analog to Digital Converter)
-		out.data[0] = CMD_CS;													//Ativa o comando ANALOG READ
-		if(count==2){															//Verificação do número de parâmetros
-			char *digitStr = in[1];												//Declaração e inicialização da string do endereço do canal 3 do ADC
-			if(validate(digitStr, 1, DIG, &(out.data[1]), 0)){						//Validação do endereço, com 1 dígito, sendo inteiro
+	//----------------------------------------------------------------------------------------------------------------------------------------------------------------------
+	}else if (strcmp(in[0], "CS") == 0){										////Verificação se é o comando CS (Control System): Altera o estado da máquina de estados
+		out.data[0] = CMD_CS;													//Ativa o comando CONTROL SYSTEM (CS)
+		if(count==2){															// Espera 1 parâmetro: o número do estado (0, 1, 2 ou 3)
+			char *digitStr = in[1];
+			if(validate(digitStr, 1, DIG, &(out.data[1]), 0)){					// Valida se o parâmetro é um dígito único (0-3)
+				out.state = ERR_PAR;											// Erro se não for um dígito válido
+				return out;														//Retorna o erro de parâmetros na string de saída
+			}
+			out.state = ALL_OK;													//Confirmação da validação (tudo bem)
+			return out;															//Retorna o comando escolhido na string de saída
+		}
+		out.state = ERR_PAR;													//Se a validação der errado, estamos com erro de parâmetros
+		return out;
+
+	}else if (strcmp(in[0], "EN") == 0){										////Verificação se é o comando EN (Enable): Ativa ou desativa a atuação dos motores
+		out.data[0] = CMD_EN;													//Ativa o comando ENABLE DOS MOTORES (EN)
+		if(count==2){															// Espera 1 parâmetro (0 para OFF, 1 para ON)
+			char *digitStr = in[1];
+			if(validate(digitStr, 1, DIG, &(out.data[1]), 0)){					// Valida se o parâmetro é um dígito único (0 ou 1)
+				out.state = ERR_PAR;											// Erro se não for um dígito válido
+				return out;														//Retorna o erro de parâmetros na string de saída
+			}
+			out.state = ALL_OK;													//Confirmação da validação (tudo bem)
+			return out;															//Retorna o comando escolhido na string de saída
+		}
+		out.state = ERR_PAR;													//Se a validação der errado, estamos com erro de parâmetros
+		return out;
+
+	}else if (strcmp(in[0], "HW") == 0){										////Verificação se é o comando HW (Período de Amostragem): Define o período de amostragem em ms
+		out.data[0] = CMD_HW;													//Ativa o comando HW
+		if(count==2){															// Espera um valor inteiro de 16 bits (UINT)
+			char *digitStr = in[1];
+			if(validate(digitStr, 4, UINT, &(out.data[1]), 0)){					// Valida se o parâmetro é um conjunto de 1 até 4 dígitos únicos (0-9)
 				out.state = ERR_PAR;											//Se a validação der errado, estamos com erro de parâmetros
 				return out;														//Retorna o erro de parâmetros na string de saída
 			}
@@ -473,11 +502,12 @@ Tokens identify(char *in[MAX_STRING], int count){								//Função de análise 
 		}
 		out.state = ERR_PAR;													//Se a validação der errado, estamos com erro de parâmetros
 		return out;
-	}else if (strcmp(in[0], "EN") == 0){											////Verificação se é o comando de leitura analógica do ADC (Analog to Digital Converter)
-		out.data[0] = CMD_EN;													//Ativa o comando ANALOG READ
-		if(count==2){															//Verificação do número de parâmetros
-			char *digitStr = in[1];												//Declaração e inicialização da string do endereço do canal 3 do ADC
-			if(validate(digitStr, 1, DIG, &(out.data[1]), 0)){						//Validação do endereço, com 1 dígito, sendo inteiro
+
+	}else if (strcmp(in[0], "RT") == 0){										////Verificação se é o comando RT (Reading Type): Define o que o sistema deve ler (Posição, Velocidade, etc.)
+		out.data[0] = CMD_RT;													//Ativa o comando RT
+		if(count==2){															// Espera 1 parâmetro de configuração (0 para ler posição, 1 para ler velocidade e 2 para ler ambos)
+			char *digitStr = in[1];
+			if(validate(digitStr, 1, DIG, &(out.data[1]), 0)){					// Valida se o parâmetro é um dígito único (0, 1 ou 2)
 				out.state = ERR_PAR;											//Se a validação der errado, estamos com erro de parâmetros
 				return out;														//Retorna o erro de parâmetros na string de saída
 			}
@@ -486,39 +516,16 @@ Tokens identify(char *in[MAX_STRING], int count){								//Função de análise 
 		}
 		out.state = ERR_PAR;													//Se a validação der errado, estamos com erro de parâmetros
 		return out;
-	}else if (strcmp(in[0], "HW") == 0){											////Verificação se é o comando de leitura analógica do ADC (Analog to Digital Converter)
-		out.data[0] = CMD_HW;													//Ativa o comando ANALOG READ
-		if(count==2){															//Verificação do número de parâmetros
-			char *digitStr = in[1];												//Declaração e inicialização da string do endereço do canal 3 do ADC
-			if(validate(digitStr, 4, UINT, &(out.data[1]), 0)){						//Validação do endereço, com 1 dígito, sendo inteiro
-				out.state = ERR_PAR;											//Se a validação der errado, estamos com erro de parâmetros
-				return out;														//Retorna o erro de parâmetros na string de saída
-			}
-			out.state = ALL_OK;													//Confirmação da validação (tudo bem)
-			return out;															//Retorna o comando escolhido na string de saída
-		}
-		out.state = ERR_PAR;													//Se a validação der errado, estamos com erro de parâmetros
-		return out;
-	}else if (strcmp(in[0], "RT") == 0){											////Verificação se é o comando de leitura analógica do ADC (Analog to Digital Converter)
-		out.data[0] = CMD_RT;													//Ativa o comando ANALOG READ
-		if(count==2){															//Verificação do número de parâmetros
-			char *digitStr = in[1];												//Declaração e inicialização da string do endereço do canal 3 do ADC
-			if(validate(digitStr, 1, DIG, &(out.data[1]), 0)){						//Validação do endereço, com 1 dígito, sendo inteiro
-				out.state = ERR_PAR;											//Se a validação der errado, estamos com erro de parâmetros
-				return out;														//Retorna o erro de parâmetros na string de saída
-			}
-			out.state = ALL_OK;													//Confirmação da validação (tudo bem)
-			return out;															//Retorna o comando escolhido na string de saída
-		}
-		out.state = ERR_PAR;													//Se a validação der errado, estamos com erro de parâmetros
-		return out;
-	}else if (strcmp(in[0], "R") == 0){											////Verificação se é o comando de leitura analógica do ADC (Analog to Digital Converter)
-		out.data[0] = CMD_R;													//Ativa o comando ANALOG READ
-		if(count==3){															//Verificação do número de parâmetros
-			char *digitStr = in[1];												//Declaração e inicialização da string do endereço do canal 3 do ADC
-			char *unitStr = in[2];
+
+	}else if (strcmp(in[0], "R") == 0){											////Verificação se é o comando R (Leitura do ADC)
+		out.data[0] = CMD_R;													//Ativa o comando R
+		if(count==3){															// Verifica se o utilizador escreveu exatamente 2 parâmetros (Total de 3 palavras)
+			char *digitStr = in[1];												// Apontador para a string do primeiro parâmetro (Canal do ADC)
+			char *unitStr = in[2];												// Apontador para a string do segundo parâmetro (Número de amostras ou valor)
+
+			// Valida o primeiro parâmetro como um dígito (DIG) e o segundo como um inteiro sem sinal (UINT)
 			if((validate(digitStr, 1, DIG, &(out.data[1]), 0))
-					||(validate(unitStr, 4, UINT, &(out.data[2]), 0))){						//Validação do endereço, com 1 dígito, sendo inteiro
+					||(validate(unitStr, 4, UINT, &(out.data[2]), 0))){
 				out.state = ERR_PAR;											//Se a validação der errado, estamos com erro de parâmetros
 				return out;														//Retorna o erro de parâmetros na string de saída
 			}
@@ -527,23 +534,27 @@ Tokens identify(char *in[MAX_STRING], int count){								//Função de análise 
 		}
 		out.state = ERR_PAR;													//Se a validação der errado, estamos com erro de parâmetros
 		return out;
-	}else if (strcmp(in[0], "PWM") == 0){											////Verificação se é o comando de leitura analógica do ADC (Analog to Digital Converter)
-		out.data[0] = CMD_PWM;													//Ativa o comando ANALOG READ
-		if(count==2){	//Verificação do número de parâmetros
-			char signStr[2];
-			char digitStr[4];
+
+	}else if (strcmp(in[0], "PWM") == 0){										////Verificação se é o comando PWM (controlo do motor)
+		out.data[0] = CMD_PWM;													//Ativa o comando PWM
+		if(count==2){															// Espera 1 parâmetro (o valor do PWM com ou sem sinal, ex: +50 ou -50) É 2 porque o sinal é um caractere
+			char signStr[2];													// Buffer para armazenar o sinal (+, -, ou vazio)
+			char digitStr[4];													// Buffer para armazenar o valor numérico (0-100)
+
+			// Lógica de separação: Se o primeiro caractere não for um número, é um sinal
 			if(in[1][0] < '0' || in[1][0] > '9'){
-				signStr[0] = in[1][0];
-				digitStr[0] = in[1][1];
+				signStr[0] = in[1][0];											// Captura o sinal (+ ou -)
+				digitStr[0] = in[1][1];											// Extrai os dígitos que vêm logo a seguir ao sinal
 				digitStr[1] = in[1][2];
 				digitStr[2] = in[1][3];
 			}else{
-				strcpy(signStr," ");
-				strcpy(digitStr,in[1]);
+				strcpy(signStr," ");											// Se começar logo pelo número, assume o sinal positivo (espaço)
+				strcpy(digitStr,in[1]);											// A string numérica é o parâmetro completo
 			}
-														//Declaração e inicialização da string do endereço do canal 3 do ADC
+
+			// Valida o sinal (tipo SIGN) e o valor numérico (tipo UINT)
 			if((validate(signStr, 1, SIGN, &(out.data[1]), 0))
-					||(validate(digitStr, 3, UINT, &(out.data[2]), 0))){						//Validação do endereço, com 1 dígito, sendo inteiro
+					||(validate(digitStr, 3, UINT, &(out.data[2]), 0))){
 				out.state = ERR_PAR;											//Se a validação der errado, estamos com erro de parâmetros
 				return out;														//Retorna o erro de parâmetros na string de saída
 			}
@@ -552,21 +563,25 @@ Tokens identify(char *in[MAX_STRING], int count){								//Função de análise 
 		}
 		out.state = ERR_PAR;													//Se a validação der errado, estamos com erro de parâmetros
 		return out;
-	}else if (strcmp(in[0], "RESPOS") == 0){											////Verificação se é o comando de leitura analógica do ADC (Analog to Digital Converter)
-		out.data[0] = CMD_RESPOS;													//Ativa o comando ANALOG READ
-		if(count==1){															//Verificação do número de parâmetros
-			out.state = ALL_OK;													//Confirmação da validação (tudo bem)
+
+	}else if (strcmp(in[0], "RESPOS") == 0){									////Verificação se é o comando RESPOS (Reset da posição 0 do disco)
+		out.data[0] = CMD_RESPOS;												//Ativa o comando RESPOS
+		if(count==1){															// Este comando não aceita parâmetros adicionais
+			out.state = ALL_OK;													// Estado OK, pois basta o nome do comando
 			return out;															//Retorna o comando escolhido na string de saída
 		}
 		out.state = ERR_PAR;													//Se a validação der errado, estamos com erro de parâmetros
-		return out;
-	}else if (strcmp(in[0], "PID") == 0){											////Verificação se é o comando de leitura analógica do ADC (Analog to Digital Converter)
-		out.data[0] = CMD_PID;													//Ativa o comando ANALOG READ
-		if(count==3){															//Verificação do número de parâmetros
-			char *digitStr = in[1];												//Declaração e inicialização da string do endereço do canal 3 do ADC
-			char *floatStr = in[2];
+		return out;																//Retorna o erro de parâmetros na string de saída
+
+	}else if (strcmp(in[0], "PID") == 0){										////Verificação se é o comando 'PID' (ajuste das variáveis e dos parâmetros do controlador PID)
+		out.data[0] = CMD_PID;													//Ativa o comando PID
+		if(count==3){															// Espera 2 parâmetros (ex: PID 0 1.5 -> Kp=1.5)
+			char *digitStr = in[1];												// Primeiro parâmetro: Índice do ganho (0=P, 1=I, 2=D)
+			char *floatStr = in[2];												// Segundo parâmetro: Valor decimal do ganho
+
+			// Valida o índice como dígito (DIG) e o valor como número de vírgula flutuante (FLOAT)
 			if((validate(digitStr, 1, DIG, &(out.data[1]), 0))
-					||(validate(floatStr, 3, FLOAT, &(out.data[2]), 0))){						//Validação do endereço, com 1 dígito, sendo inteiro
+					||(validate(floatStr, 3, FLOAT, &(out.data[2]), 0))){
 				out.state = ERR_PAR;											//Se a validação der errado, estamos com erro de parâmetros
 				return out;														//Retorna o erro de parâmetros na string de saída
 			}
@@ -574,7 +589,7 @@ Tokens identify(char *in[MAX_STRING], int count){								//Função de análise 
 			return out;															//Retorna o comando escolhido na string de saída
 		}
 		out.state = ERR_PAR;													//Se a validação der errado, estamos com erro de parâmetros
-		return out;
+		return out;																//Retorna o erro de parâmetros na string de saída
 	}
 	out.state = ERR_CMD;														// Se não coincidir com nenhum comando conhecido, dá erro de comando
 	return out;																	//Retorna o erro de comando na string de saída
@@ -634,12 +649,15 @@ void list(int num, char out[64], Type t, int pin){  //Função para ajudar na li
 }
 //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-Error check_state(int states[4]){
-	int i=0;
-	for(i=0;i<4;i++){
-		if(CS==states[i]) return ALL_OK;
+Error check_state(int states[4]){					//Verifica se o estado atual do sistema (CS) consta na lista de estados permitidos para um determinado comando
+	int i=0;										// Inicializa a variável auxiliar para percorrer o array
+	for(i=0;i<4;i++){								// Ciclo para comparar o estado atual com a lista de estados autorizados
+
+		// Se o estado atual (CS) coincidir com um dos estados da lista
+		if(CS==states[i]) return ALL_OK;			 // Validação bem-sucedida: o comando pode ser executado
 	}
-	return ERR;
+	// Se o ciclo terminar sem encontrar uma correspondência
+	return ERR;										// Retorna erro: o sistema não está num estado que permita este comando
 }
 //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -676,6 +694,7 @@ Tokens parse(char in[MAX_CHAR], const char delim[MAX_DELIM]){		//Função de tok
 ADC_ChannelConfTypeDef ADC_CH_Cfg = {0}; //Inicialização da configuração do canal do ADC
 //Lista de canais ADC
 uint32_t ADC_Channels[] = {ADC_CHANNEL_0, ADC_CHANNEL_1, ADC_CHANNEL_2, ADC_CHANNEL_3, ADC_CHANNEL_4, ADC_CHANNEL_5, ADC_CHANNEL_6, ADC_CHANNEL_7, ADC_CHANNEL_8, ADC_CHANNEL_9, ADC_CHANNEL_10, ADC_CHANNEL_11, ADC_CHANNEL_12, ADC_CHANNEL_13, ADC_CHANNEL_14, ADC_CHANNEL_15, ADC_CHANNEL_16, ADC_CHANNEL_17, ADC_CHANNEL_18, ADC_CHANNEL_19};
+
 void execute(Tokens in){ //Função execute
 	// Buffers locais para montagem das mensagens de resposta ao utilizador
 	char resposta[MAX_OUT] = {};						//Resposta ao utilizador
@@ -702,6 +721,7 @@ void execute(Tokens in){ //Função execute
 			print("PWM <dutyCycle>                                            - Duty-cycle de <dutyCycle>%\n");
 			print("RA <addr>                                                           - Ler o canal <addr> de um ADC pre-determinado");
 			break;
+
 		case CMD_MR:									//Memory Read
 			snprintf(resposta, MAX_OUT,					//Apresentação da resposta ao comando
 					"Ler %d bytes a partir de endereco de memoria %04Xh ", in.data[2], in.data[1]);
@@ -715,6 +735,7 @@ void execute(Tokens in){ //Função execute
 			}
 			print(out);
 			break;
+
 		case CMD_MW:									//Memory Write
 			snprintf(resposta, MAX_OUT,					//Apresentação da resposta ao comando
 					"Escrever %d bytes a partir de endereco de memoria %04Xh com o valor %02Xh ", in.data[2], in.data[1], in.data[3]);
@@ -766,6 +787,7 @@ void execute(Tokens in){ //Função execute
 					"\nPinos definidos como entrada.");
 			print(resposta);								//Escrita da resposta
 			break;
+
 		case CMD_PO:									//Make Pins Output
 			list(in.data[2], active, PIN, 0);			// Converte a máscara hexadecimal para uma string legível
 			snprintf(resposta, MAX_OUT,					//Apresentação da resposta ao comando
@@ -794,6 +816,7 @@ void execute(Tokens in){ //Função execute
 				"\nPinos definidos como saida.");
 			print(resposta);							//Escrita da resposta
 			break;
+
 		case CMD_RD:									//Read Digital Input
 			list(in.data[2], active, PIN, 0);			// Converte a máscara hexadecimal para uma string legível
 			snprintf(resposta, MAX_OUT,					//Apresentação da resposta ao comando
@@ -827,6 +850,7 @@ void execute(Tokens in){ //Função execute
 							"\nLer os pinos");
 			print(resposta);							//Escrita da resposta
 			break;
+
 		case CMD_WD:									// Write Digital Output
 			list(in.data[2], active, PIN, 0);			// Converte a máscara hexadecimal para uma string legível
 			list(in.data[2], value, BIN, in.data[3]);	// Traduz os valores hexadecimais em binário (0's e 1's)
@@ -857,7 +881,8 @@ void execute(Tokens in){ //Função execute
 					"\nEscrever os pinos");
 			print(resposta);				//Escrita da resposta
 			break;
-		case CMD_PWMS:									//Pulse Width Modulation
+
+		case CMD_PWMS:									//Pulse Width Modulation (PWMS porque usámos PWM para o guia 2)
 			uint32_t num = /* 255 - */in.data[1];		//Valor de entrada
 			num *= 100;									//Multiplicação para percentagem
 			uint32_t uni = num / 255;					//Obtenção do valor inteiro (quociente)
@@ -898,174 +923,204 @@ void execute(Tokens in){ //Função execute
 		    print(resposta);				//Escrita da resposta
 		    HAL_ADC_Stop(&hadc1);			//Desliga o ADC
 			break;
-		//-------------------------------
-		case CMD_CS:									//
-			snprintf(resposta, MAX_OUT,					//Apresentação da resposta ao comando
+		//------------------------------------------------------------------------------------------------------------------------------------------------------------------
+		case CMD_CS:									// Execução da mudança de estado
+			snprintf(resposta, MAX_OUT,					// Prepara a string de resposta informativa para o utilizador
 					"Define o estado como %d", in.data[1]);
-			print(resposta);
-			if(in.data[1]<=3){
+			print(resposta);							// Envia a confirmação do comando para o terminal série (UART)
+
+			if(in.data[1]<=3){ 							// Valida se o estado solicitado está no intervalo permitido (0 a 3)
+
+				// Implementação das regras de transição da Máquina de Estados (Segurança):
+				// Só permite entrar em modo Manual (2) ou Automático (3) se o sistema vier de Configuração (1)
 				if((CS==2)&&(in.data[1]!=3)||(CS==3)&&(in.data[1]!=2)||(CS==1)){
-					CS = in.data[1];
+					CS = in.data[1];					// Atualiza a variável global que controla o fluxo da máquina de estados
 				}else{
-					snprintf(resposta, MAX_OUT,	//Apresentação da resposta ao comando
-							"\nERRO DE ESTADO!");
-					print(resposta);
+					snprintf(resposta, MAX_OUT,			// Prepara uma mensagem de erro se a transição for inválida
+							"\nERRO DE ESTADO!");		// Bloqueia as transições não permitidas (por exemplo: Manual -> Auto diretamente não dá)
+					print(resposta);					// Envia o aviso de erro ao utilizador
 				}
 			}else{
-				snprintf(resposta, MAX_OUT,	//Apresentação da resposta ao comando
+				snprintf(resposta, MAX_OUT,				// Prepara uma mensagem caso o utilizador insira um número > 3
 						"\nERRO DE VALOR!");
-				print(resposta);
+				print(resposta);						// Informa que o estado solicitado não existe
 			}
-			break;
-		case CMD_EN:									//
-			snprintf(resposta, MAX_OUT,					//Apresentação da resposta ao comando
+			break;										// Finaliza a execução do comando CS
+
+		case CMD_EN:									// Execução da ativação do motor (ENABLE)
+			snprintf(resposta, MAX_OUT,					// Prepara a string confirmando o valor de enable recebido
 					"Define o enable como %d", in.data[1]);
-			print(resposta);
-			int en[]={2,3,-1,-1};
-			if(!check_state(en)){
-				if(in.data[1]<=1){
-					EN = in.data[1];
-					if(EN){
+			print(resposta);							// Envia a confirmação para a UART
+			int en[]={2,3,-1,-1};						// Define a lista de estados permitidos para este comando (Manual e Automático)
+			if(!check_state(en)){						// Verifica se o sistema está num estado que permite ligar/desligar motores
+				if(in.data[1]<=1){						// Valida se o parâmetro é binário (0: OFF, 1: ON)
+					EN = in.data[1];					// Atualiza a variável global de ativação (Enable)
+					if(EN){								// Se o comando for para ativar o motor (EN = 1)
+
+						// Inicia a geração de sinais PWM nos canais do Timer 3 para controlar a Ponte-H
 						HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
 						HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_2);
 						HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_3);
-					}else{
+					}else{								// Se o comando for para desativar o motor (EN = 0)
+						// Interrompe imediatamente os sinais PWM para parar a alimentação dos motores
 						HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_1);
 						HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_2);
 						HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_3);
 					}
 					//HAL_GPIO_WritePin(GPIOB, GPIO_PIN_MOTOR, (EN==1) ? GPIO_PIN_SET : GPIO_PIN_RESET);
+
+					// Formatação da mensagem final indicando o novo estado real dos motores
 					snprintf(resposta, MAX_OUT, "\nMotores %s", (EN==1) ? "ATIVADOS" : "DESATIVADOS");
-					print(resposta);
+					print(resposta);					// Envia o feedback visual para o terminal
 				}else{
-					snprintf(resposta, MAX_OUT,	//Apresentação da resposta ao comando
+					snprintf(resposta, MAX_OUT,			// Erro se o valor inserido não for 0 nem 1
 							"\nERRO DE VALOR!");
 					print(resposta);
 				}
 			}else{
-				snprintf(resposta, MAX_OUT,	//Apresentação da resposta ao comando
-						"\nESTADO ERRADO!");
+				snprintf(resposta, MAX_OUT,				// Erro se o sistema estiver num estado em que não dê para usar EN
+						"\nESTADO ERRADO!");			// Impede uma ativação acidental de motores durante a configuração
 				print(resposta);
 			}
-			break;
-		case CMD_HW:									//
-			snprintf(resposta, MAX_OUT,					//Apresentação da resposta ao comando
+			break;										// Finaliza a execução do comando EN
+
+		case CMD_HW:									// Execução do comando HW (período de amostragem)
+			snprintf(resposta, MAX_OUT,					// Prepara a mensagem de confirmação do parâmetro recebido
 					"Define o periodo de amostragem como %d", in.data[1]);
-			print(resposta);
-			int hw[]={1,-1,-1,-1};
-			if(!check_state(hw)){
-				if(in.data[1]<=1000){
+			print(resposta);							// Envia o feedback visual para o utilizador pela UART
+			int hw[]={1,-1,-1,-1};						// Define que este comando só é permitido no Estado 1 (Configuração)
+			if(!check_state(hw)){						// Verifica se o sistema está no estado de Configuração
+				if(in.data[1]<=1000){					// Valida se o período inserido é seguro (limite de 1000ms = 1 segundo)
 					//periodo = in.data[1]//(ms)
 				}else{
-					snprintf(resposta, MAX_OUT,	//Apresentação da resposta ao comando
+					snprintf(resposta, MAX_OUT,			// Erro se o valor ultrapassar o limite definido por segurança
 							"\nERRO DE VALOR!");
 					print(resposta);
 				}
 			}else{
-				snprintf(resposta, MAX_OUT,	//Apresentação da resposta ao comando
+				snprintf(resposta, MAX_OUT,				// Bloqueia a alteração do período se o motor já estiver em Manual ou Automático
 						"\nESTADO ERRADO!");
 				print(resposta);
 			}
-			break;
-		case CMD_RT:									//
-			snprintf(resposta, MAX_OUT,					//Apresentação da resposta ao comando
+			break;										// Finaliza a execução do comando HW
+
+		case CMD_RT:									// Execução do comando RT (tipo de leitura)
+			snprintf(resposta, MAX_OUT,					// Prepara a string de resposta com o modo de leitura pretendido
 					"Define o modo de leitura como %d", in.data[1]);
-			print(resposta);
-			int rt[]={1,-1,-1,-1};
-			if(!check_state(rt)){
-				if(in.data[1]<=2){
+			print(resposta);							// Envia confirmação para o terminal
+			int rt[]={1,-1,-1,-1};						// Define que este comando só é permitido no Estado 1 (Configuração)
+			if(!check_state(rt)){						// Verifica se o sistema está no estado de Configuração
+				if(in.data[1]<=2){						// Valida o modo: 0 (Posição), 1 (Velocidade) ou 2 (Ambos)
 					//
 				}else{
-					snprintf(resposta, MAX_OUT,	//Apresentação da resposta ao comando
+					snprintf(resposta, MAX_OUT,			// Erro se o modo de leitura for inexistente (>2)
 							"\nERRO DE VALOR!");
 					print(resposta);
 				}
 			}else{
-				snprintf(resposta, MAX_OUT,	//Apresentação da resposta ao comando
+				snprintf(resposta, MAX_OUT,				// Impede a mudança de tipo de leitura fora do modo de configuração
 						"\nESTADO ERRADO!");
 				print(resposta);
 			}
-			break;
-		case CMD_R:									//
-			snprintf(resposta, MAX_OUT,					//Apresentação da resposta ao comando
+			break;										// Finaliza a execução do comando RT
+
+		case CMD_R:										// Execução do comando R (Leitura do ADC)
+			snprintf(resposta, MAX_OUT,					// Prepara a string confirmando os parâmetros de leitura recebidos
 					"Define a leitura como %d e %d", in.data[1], in.data[2]);
-			print(resposta);
-			int r[]={2,-1,-1,-1};
-			if(!check_state(r)){
-				if(in.data[1]<=2){
+			print(resposta);							// Envia o feedback para o terminal série
+			int r[]={2,-1,-1,-1};						// Define que a leitura manual só é permitida no Estado 2 (Manual)
+			if(!check_state(r)){						// Valida se o sistema se encontra no modo Manual
+				if(in.data[1]<=2){						// Verifica se o canal/tipo de leitura solicitado é válido (0, 1 ou 2)
 					//
 				}else{
-					snprintf(resposta, MAX_OUT,	//Apresentação da resposta ao comando
+					snprintf(resposta, MAX_OUT,			// Mensagem de erro caso o parâmetro de canal seja inválido
 							"\nERRO DE VALOR!");
 					print(resposta);
 				}
 			}else{
-				snprintf(resposta, MAX_OUT,	//Apresentação da resposta ao comando
+				snprintf(resposta, MAX_OUT,				// Bloqueia a leitura se o sistema estiver em Reset, Config ou Auto
 						"\nESTADO ERRADO!");
 				print(resposta);
 			}
-			break;
-		case CMD_PWM:									//
-			snprintf(resposta, MAX_OUT,					//Apresentação da resposta ao comando
+			break;										// Finaliza a execução do comando R
+
+		case CMD_PWM:									//Execução do comando PWM(Controlo da atuação)
+			snprintf(resposta, MAX_OUT,					// Mostra o valor do Duty Cycle (%) e o sentido (+ ou -) no terminal
 					"Define o PWM como %d%% com o direcao %c", in.data[2],(in.data[1])?'+':'-');
 			print(resposta);
-			int pwm[]={1,2,-1,-1};
-			if(!check_state(pwm)){
-				if(abs(in.data[2])<=100){
+			int pwm[]={1,2,-1,-1};						// Define que o ajuste do PWM só é válido nos estados 1 (Config) e 2 (Manual)
+			if(!check_state(pwm)){						// Verifica se estamos num dos dois estados definidos acima
+
+				if(abs(in.data[2])<=100){				// Valida se o Duty Cycle está entre 0% e 100%
+
+					// Cálculo do valor de comparação (CCR):
+					// Converte a percentagem (0-100%) para o valor proporcional ao ARR (Auto-Reload Register) do Timer.
 					int pwm=(in.data[2]*__HAL_TIM_GET_AUTORELOAD(&htim3))/100;
-					if(in.data[1]) { // Forward
+
+					if(in.data[1]) { 					// Lógica para o sentido direto (Forward / +)
+						// Define o sinal PWM no Canal 1 e desativa o Canal 2 para rodar num sentido
 						__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, pwm); // Canal Direção +
 					    __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, 0);   // Canal Direção -
-					} else { // Reverse
+
+					} else { 							// Lógica para o sentido inverso (Reverse / -)
+						// Desativa o Canal 1 e define o sinal PWM no Canal 2 para inverter a polaridade na Ponte-H
 					    __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 0);
 					    __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, pwm);
 					}
 				}else{
-					snprintf(resposta, MAX_OUT,	//Apresentação da resposta ao comando
+					snprintf(resposta, MAX_OUT,			// Erro se o utilizador tentar definir mais de 100% de PWM
 							"\nERRO DE VALOR!");
 					print(resposta);
 				}
 			}else{
-				snprintf(resposta, MAX_OUT,	//Apresentação da resposta ao comando
+				snprintf(resposta, MAX_OUT,				// Impede o controlo manual do PWM se o sistema estiver em Modo Automático (Estado 3)
 						"\nESTADO ERRADO!");
 				print(resposta);
 			}
-			break;
-		case CMD_RESPOS:									//
-			snprintf(resposta, MAX_OUT,					//Apresentação da resposta ao comando
+			break;										// Finaliza a execução do comando PWM
+
+		case CMD_RESPOS:								//Execução do comando RESPOS(Reset da posição 0 do disco)
+			snprintf(resposta, MAX_OUT,					// Prepara a mensagem de confirmação para o utilizador
 					"Reinicia a posicao");
-			print(resposta);
-			int respos[]={1,2,-1,-1};
-			if(!check_state(respos)){
+			print(resposta);							// Envia o feedback para o terminal série
+			int respos[]={1,2,-1,-1};					// Define que o reset da posição é permitido em Config (1) ou Manual (2)
+			if(!check_state(respos)){					// Verifica se o sistema está num dos estados autorizados
 				//
 			}else{
-				snprintf(resposta, MAX_OUT,	//Apresentação da resposta ao comando
+				snprintf(resposta, MAX_OUT,				// Erro se o utilizador tentar dar reset durante o modo Automático
 						"\nESTADO ERRADO!");
 				print(resposta);
 			}
-			break;
-		case CMD_PID:									//
-			uint32_t numP = in.data[2];		//Valor de entrada
-			uint32_t uniP = numP / 10;					//Obtenção do valor inteiro (quociente)
-			uint32_t decP = numP % 10;					//Obtenção do valor decimal restante (resto)
-			snprintf(resposta, MAX_OUT,					//Apresentação da resposta ao comando
+			break;										// Finaliza a execução do comando RESPOS
+
+		case CMD_PID:									//Execução do comando PID(Configuração dos ganhos proporcional, integrativo e derivativo)
+
+			// O valor recebido (in.data[2]) está num ponto fixo (valor real * 10).
+			// Exemplo: se o utilizador enviou "3.4", o valor armazenado é 34
+			uint32_t numP = in.data[2];					// Armazena o valor bruto (ex: 34)
+			uint32_t uniP = numP / 10;					// Obtém a parte inteira (ex: 34 / 10 = 3)
+			uint32_t decP = numP % 10;					// Obtém a parte decimal (ex: 34 % 10 = 4)
+
+			snprintf(resposta, MAX_OUT,					// Formata a resposta para mostrar o índice do ganho e o valor original com ponto (ex: 3.4)
 					"Define o PID como %d e posicaoo %d.%d", in.data[1], uniP, decP);
-			print(resposta);
-			int pid[]={1,-1,-1,-1};
-			if(!check_state(pid)){
-				if(abs(in.data[1])<=5){
+			print(resposta);							//Escrita da resposta
+
+			int pid[]={1,-1,-1,-1};						// A alteração de ganhos só é permitida no Estado 1 (Configuração)
+			if(!check_state(pid)){						// Garante a estabilidade do sistema impedindo alterações em pleno voo
+				if(abs(in.data[1])<=5){					// Valida o índice do parâmetro (ex: 0=Kp, 1=Ki, 2=Kd, etc.)
 					//EN = in.data[1];
 				}else{
-					snprintf(resposta, MAX_OUT,	//Apresentação da resposta ao comando
+					snprintf(resposta, MAX_OUT,			// Erro se o índice for maior que o número de parâmetros disponíveis
 							"\nERRO DE VALOR!");
 					print(resposta);
 				}
 			}else{
-				snprintf(resposta, MAX_OUT,	//Apresentação da resposta ao comando
+				snprintf(resposta, MAX_OUT,				// Impede a configuração se o sistema estiver em Manual ou Automático
 						"\nESTADO ERRADO!");
 				print(resposta);
 			}
-			break;
+			break;										// Finaliza a execução do comando PID
+
 		default:
 			print("ERRO INTERNO!");						//Se não foi selecionado nenhum dos comandos
 			break;
@@ -1102,28 +1157,29 @@ int main_loop(void){
 		// 1. parse(): Divide a string em tokens e valida a sintaxe (Análise Léxica/Sintática)
 		// 2. execute(): Recebe o resultado do parse e atua no hardware (Semântica/Execução)
 		execute(parse(input, delim));
-		//print("\n[MANUAL]>");									// Imprime o prompt para indicar ao utilizador que o sistema está pronto para o próximo comando
+		//print("\n[MANUAL]>");							// Imprime o prompt para indicar ao utilizador que o sistema está pronto para o próximo comando
 		//Limpeza e Preparação para o próximo ciclo
-		data_ready = 0;								//Reset da flag de receção
+		data_ready = 0;									//Reset da flag de receção
 		memset(input, 0, MAX_CHAR); 					//Limpa o buffer de entrada para evitar resíduos de comandos anteriores (por segurança)
+
 		// Reinício da escuta da UART
 		if(start_scan(input) != HAL_OK){				// Tenta reativar o modo de receção
-		 __HAL_UART_CLEAR_OREFLAG(&huart3);		//Limpa o erro de Overrun para desbloquear o periférico
-		 start_scan(input);						// Segunda tentativa de arranque após limpeza do erro
+		 __HAL_UART_CLEAR_OREFLAG(&huart3);				//Limpa o erro de Overrun para desbloquear o periférico
+		 start_scan(input);								// Segunda tentativa de arranque após limpeza do erro
 		}
 		return 1;
 	}
 	if (ov){											// Verifica se a flag de overflow está ativa
-		ov = 0;									// Reset da flag (acknowledge)
-	  	HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_0);	// Indicação visual que o código não "encravou" e o loop principal continua a correr
+		ov = 0;											// Reset da flag (acknowledge)
+	  	HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_0);			// Indicação visual que o código não "encravou" e o loop principal continua a correr
 	}
 	return 0;
 }
 //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 void state_machine(){
-	switch(CS){
-	case 0:				//Reset
+	switch(CS){			//Switch Case para todos os casos
+	case 0:				//Estado 0: Reset
 		print("\n\nRESET- - - - - - - - - - -");
 		/*
 		Desativa os pinos de enable, de definição de sentido de rotação e de sinal de PWM;
@@ -1131,10 +1187,10 @@ void state_machine(){
 		Deve ser desativado qualquer periférico em atuação;
 		Transição de estado: o estado 0 deve ser transitório, passando para o estado 1 (modo de configuração) após o reset das variáveis ser concluído.
 		*/
-		EN = 0;
-		CS = 1;
+		EN = 0;		//Desativa o motor
+		CS = 1;		//Por defeito, passamos automaticamente do estado 0 para o estado 1
 		break;
-	case 1:				//Config
+	case 1:				//Estado 1: Configuração
 		print("\n\nCONFIG- - - - - - - - - - -");
 		print("\n[CONFIG]>");
 		/*
@@ -1154,14 +1210,14 @@ void state_machine(){
 //		if(last_CS != 1){
 //			EN = 0;
 //		}
-		EN = 0;
-		while (CS==1){
+		EN = 0;			//Desativa o motor
+		while (CS==1){		// Executa o loop de polling de comandos pela UART enquanto estiver neste estado
 			if(main_loop()){
-			print("\n[CONFIG]>");
+			print("\n[CONFIG]>");			// Prompt visual para o utilizador
 			}
 		}
 		break;
-	case 2:				//Manual
+	case 2:				//Estado 2: Modo Manual
 		print("\n\nMANUAL- - - - - - - - - - -");
 		print("\n[MANUAL]>");
 		/*
@@ -1180,13 +1236,13 @@ void state_machine(){
 //		if(last_CS != 2){
 //
 //		}
-		while (CS==2){
+		while (CS==2){		// Permite o controlo direto e a leitura de sensores sem malha fechada
 			if(main_loop()){
 			print("\n[MANUAL]>");
 			}
 		}
 		break;
-	case 3:				//Auto
+	case 3:				//Estado 3: Modo Automático
 		print("\n\nAUTO- - - - - - - - - - -");
 		print("\n[AUTO]>");
 		/*
@@ -1205,17 +1261,18 @@ void state_machine(){
 //		if(EN != 0){
 //			CS=1;
 //		}
-		EN=1;
-		while (CS==3){
+		EN=1;		//Ativa o motor
+		while (CS==3){ //Enquanto ficarmos neste estado
 			if(main_loop()){
 			print("\n[AUTO]>");
 			}
+			// Se o motor for desativado pelo comando enable (EN=0), regressa ao modo de configuração (1) por segurança
 			if(!EN){
 				CS=1;
 			}
 		}
 		break;
-	default:			//Safety
+	default:			//Por defeito, começa-se sempre no estado 0
 		CS = 0;
 		break;
 	}
@@ -1307,7 +1364,7 @@ Error_Handler();
     /* USER CODE BEGIN 3 */
 	  //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 	  //Bloco de processamento de comandos (consumidor)
-	  state_machine();
+	  state_machine();									//Chama a máquina de estados
 //	  if(data_ready == 1){ 								//Verifica se a flag de receção foi ativada
 //		  upperCase(input);								//Se foi, garante que todos os comandos recebidos ficam apenas em maiúsculas (por causa do Case Sensitivity)
 //		  // 1. parse(): Divide a string em tokens e valida a sintaxe (Análise Léxica/Sintática)
@@ -1392,10 +1449,10 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)	//Call
         data_ready = 1; 				//Ativa a flag de sinalização. O loop principal (while(1)) verá este '1' e saberá que pode começar a processar o comando.
     }
 }
-void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim){ //Callback do Período do Timer: Executado quando o contador do Timer atinge o valor de Auto-Reload (ARR).
-	if (htim == &htim3){ // Filtra para garantir que estamos a reagir apenas ao Timer 3
-		ov = 1; // Sinaliza que o período de tempo decorreu (Overflow).
-		//As ISR devem ser o mais curtas possível!
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim){ //Callback do Período do Timer: Executado quando o contador do Timer atinge o valor de Auto-Reload (ARR)
+	if (htim == &htim3){ 				// Filtra para garantir que estamos a reagir apenas ao Timer 3
+		ov = 1; 						// Sinaliza que o período de tempo decorreu (Overflow).
+										//As ISR devem ser o mais curtas possível!
 	}
 }
 
