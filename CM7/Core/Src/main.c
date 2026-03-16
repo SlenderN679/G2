@@ -68,6 +68,9 @@ void SystemClock_Config(void);
 #define TIM3_CCR  (32000-1) // Valor de início do Capture-Compare Register
 
 #define MAX_ADC 10			//Timeout de 10ms
+
+#define VOL 10
+#define MAX_VOL 960*VOL
 //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 /* USER CODE END PFP */
 
@@ -80,10 +83,14 @@ char input[MAX_CHAR] = "";												  //Declaração e inicialização do buff
 volatile uint8_t data_ready = 0;										  //Declaração e inicialização da flag de receção da uart
 int pins[16];															  //Declaração e inicialização do vetor de pinos ativos pelos comandos
 volatile uint8_t ov;													  //Variável para a flag de interrupção genérica (overflow)
-
+volatile int inc_pos=0;
+volatile int inc_vel=0;
+volatile int lim=0;
+volatile int vol=0;
 int CS=0;																  //Variável de estado do Sistema de Controlo (0:Reset, 1:Config, 2:Manual, 3:Auto)
 //int last_CS=0;
 int EN=0;																  //Variável de ativação (Enable) dos motores (0: Desligado, 1: Ligado)
+uint8_t Per = 499;
 
 typedef enum{                           // Enumeração dos tipos de parâmetros esperados na análise sintática
     /*HEX = 0,                          // Parâmetro hexadecimal
@@ -576,7 +583,7 @@ Tokens identify(char *in[MAX_STRING], int count){								//Função de análise 
 	}else if (strcmp(in[0], "PID") == 0){										////Verificação se é o comando 'PID' (ajuste das variáveis e dos parâmetros do controlador PID)
 		out.data[0] = CMD_PID;													//Ativa o comando PID
 		if(count==3){															// Espera 2 parâmetros (ex: PID 0 1.5 -> Kp=1.5)
-			char *digitStr = in[1];												// Primeiro parâmetro: Índice do ganho (0=P, 1=I, 2=D)
+			char *digitStr = in[1];												// Primeiro parâmetro: �?ndice do ganho (0=P, 1=I, 2=D)
 			char *floatStr = in[2];												// Segundo parâmetro: Valor decimal do ganho
 
 			// Valida o índice como dígito (DIG) e o valor como número de vírgula flutuante (FLOAT)
@@ -688,6 +695,22 @@ Tokens parse(char in[MAX_CHAR], const char delim[MAX_DELIM]){		//Função de tok
 	 	token = strtok(NULL, delim);								// O NULL indica ao strtok para continuar na string original
 	 }
 	 return identify(strings, count);								// Passa o vetor resultante para a Análise Sintática (identify)
+}
+void enable(int e){
+	EN=e;
+	if(EN){								// Se o comando for para ativar o motor (EN = 1)
+		// Inicia a geração de sinais PWM nos canais do Timer 3 para controlar a Ponte-H
+		HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
+		HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_2);
+		HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_3);
+		HAL_TIM_Base_Start_IT(&htim6);		//início do timer para o PWM
+	}else{								// Se o comando for para desativar o motor (EN = 0)
+		// Interrompe imediatamente os sinais PWM para parar a alimentação dos motores
+		HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_1);
+		HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_2);
+		HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_3);
+		HAL_TIM_Base_Stop_IT(&htim6);		//início do timer para o PWM
+	}
 }
 //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -954,19 +977,21 @@ void execute(Tokens in){ //Função execute
 			int en[]={2,3,-1,-1};						// Define a lista de estados permitidos para este comando (Manual e Automático)
 			if(!check_state(en)){						// Verifica se o sistema está num estado que permite ligar/desligar motores
 				if(in.data[1]<=1){						// Valida se o parâmetro é binário (0: OFF, 1: ON)
-					EN = in.data[1];					// Atualiza a variável global de ativação (Enable)
-					if(EN){								// Se o comando for para ativar o motor (EN = 1)
-
-						// Inicia a geração de sinais PWM nos canais do Timer 3 para controlar a Ponte-H
-						HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
-						HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_2);
-						HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_3);
-					}else{								// Se o comando for para desativar o motor (EN = 0)
-						// Interrompe imediatamente os sinais PWM para parar a alimentação dos motores
-						HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_1);
-						HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_2);
-						HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_3);
-					}
+					//EN = in.data[1];					// Atualiza a variável global de ativação (Enable)
+//					if(EN){								// Se o comando for para ativar o motor (EN = 1)
+//											// Inicia a geração de sinais PWM nos canais do Timer 3 para controlar a Ponte-H
+//											HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
+//											HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_2);
+//											HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_3);
+//											HAL_TIM_Base_Start_IT(&htim6);		//início do timer para o PWM
+//										}else{								// Se o comando for para desativar o motor (EN = 0)
+//											// Interrompe imediatamente os sinais PWM para parar a alimentação dos motores
+//											HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_1);
+//											HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_2);
+//											HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_3);
+//											HAL_TIM_Base_Stop_IT(&htim6);		//início do timer para o PWM
+//										}
+					enable(in.data[1]);
 					//HAL_GPIO_WritePin(GPIOB, GPIO_PIN_MOTOR, (EN==1) ? GPIO_PIN_SET : GPIO_PIN_RESET);
 
 					// Formatação da mensagem final indicando o novo estado real dos motores
@@ -986,12 +1011,13 @@ void execute(Tokens in){ //Função execute
 
 		case CMD_HW:									// Execução do comando HW (período de amostragem)
 			snprintf(resposta, MAX_OUT,					// Prepara a mensagem de confirmação do parâmetro recebido
-					"Define o periodo de amostragem como %d", in.data[1]);
+					"Define o periodo de amostragem como %dms", in.data[1]);
 			print(resposta);							// Envia o feedback visual para o utilizador pela UART
 			int hw[]={1,-1,-1,-1};						// Define que este comando só é permitido no Estado 1 (Configuração)
 			if(!check_state(hw)){						// Verifica se o sistema está no estado de Configuração
 				if(in.data[1]<=1000){					// Valida se o período inserido é seguro (limite de 1000ms = 1 segundo)
-					//periodo = in.data[1]//(ms)
+					__HAL_TIM_SET_AUTORELOAD(&htim6, (in.data[1]-1)?in.data[1]-1:999);
+					__HAL_TIM_SET_COUNTER(&htim6, 0);
 				}else{
 					snprintf(resposta, MAX_OUT,			// Erro se o valor ultrapassar o limite definido por segurança
 							"\nERRO DE VALOR!");
@@ -1059,13 +1085,15 @@ void execute(Tokens in){ //Função execute
 
 					if(in.data[1]) { 					// Lógica para o sentido direto (Forward / +)
 						// Define o sinal PWM no Canal 1 e desativa o Canal 2 para rodar num sentido
+						__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, 0);   // Canal Direção -
+						HAL_Delay(1);
 						__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, pwm); // Canal Direção +
-					    __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, 0);   // Canal Direção -
 
 					} else { 							// Lógica para o sentido inverso (Reverse / -)
 						// Desativa o Canal 1 e define o sinal PWM no Canal 2 para inverter a polaridade na Ponte-H
-					    __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 0);
-					    __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, pwm);
+					    __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 0);   // Canal Direção +
+					    HAL_Delay(1);
+					    __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, pwm); // Canal Direção -
 					}
 				}else{
 					snprintf(resposta, MAX_OUT,			// Erro se o utilizador tentar definir mais de 100% de PWM
@@ -1085,7 +1113,8 @@ void execute(Tokens in){ //Função execute
 			print(resposta);							// Envia o feedback para o terminal série
 			int respos[]={1,2,-1,-1};					// Define que o reset da posição é permitido em Config (1) ou Manual (2)
 			if(!check_state(respos)){					// Verifica se o sistema está num dos estados autorizados
-				//
+				inc_pos=0;
+				inc_vel=0;
 			}else{
 				snprintf(resposta, MAX_OUT,				// Erro se o utilizador tentar dar reset durante o modo Automático
 						"\nESTADO ERRADO!");
@@ -1171,7 +1200,22 @@ int main_loop(void){
 	}
 	if (ov){											// Verifica se a flag de overflow está ativa
 		ov = 0;											// Reset da flag (acknowledge)
-	  	HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_0);			// Indicação visual que o código não "encravou" e o loop principal continua a correr
+		char resposta[MAX_OUT] = {};						//Resposta ao utilizador
+	  	//HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_0);			// Indicação visual que o código não "encravou" e o loop principal continua a correr
+		float PosRad = (inc_pos*(2.0*M_PI))/960.0;
+		float PosGra = (inc_pos*360.0)/960.0;
+
+		float pulse = (float)inc_vel/(__HAL_TIM_GET_AUTORELOAD(&htim6)/1000.0);
+		float VelRad = (pulse*(2.0*M_PI))/960.0;
+		float VelGra = (pulse*60.0)/960.0;
+		inc_vel=0;
+		snprintf(resposta, MAX_OUT,					// Formata a resposta para mostrar o índice do ganho e o valor original com ponto (ex: 3.4)
+				"\nPos: %0.3f rad | %0.3f deg + %d voltas\nVel: %0.3f rad/s | %0.3f rpm\n", PosRad, PosGra, vol, VelRad, VelGra);
+		print(resposta);
+	}
+	if(lim){
+		lim=0;
+		print("Limite de voltas atingido");
 	}
 	return 0;
 }
@@ -1187,7 +1231,8 @@ void state_machine(){
 		Deve ser desativado qualquer periférico em atuação;
 		Transição de estado: o estado 0 deve ser transitório, passando para o estado 1 (modo de configuração) após o reset das variáveis ser concluído.
 		*/
-		EN = 0;		//Desativa o motor
+		//EN = 0;		//Desativa o motor
+		enable(0);
 		CS = 1;		//Por defeito, passamos automaticamente do estado 0 para o estado 1
 		break;
 	case 1:				//Estado 1: Configuração
@@ -1210,7 +1255,8 @@ void state_machine(){
 //		if(last_CS != 1){
 //			EN = 0;
 //		}
-		EN = 0;			//Desativa o motor
+		//EN = 0;			//Desativa o motor
+		enable(0);
 		while (CS==1){		// Executa o loop de polling de comandos pela UART enquanto estiver neste estado
 			if(main_loop()){
 			print("\n[CONFIG]>");			// Prompt visual para o utilizador
@@ -1261,7 +1307,8 @@ void state_machine(){
 //		if(EN != 0){
 //			CS=1;
 //		}
-		EN=1;		//Ativa o motor
+		//EN=1;		//Ativa o motor
+		enable(1);
 		while (CS==3){ //Enquanto ficarmos neste estado
 			if(main_loop()){
 			print("\n[AUTO]>");
@@ -1344,6 +1391,7 @@ Error_Handler();
   MX_USART3_UART_Init();
   MX_TIM3_Init();
   MX_ADC1_Init();
+  MX_TIM6_Init();
   /* USER CODE BEGIN 2 */
   //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
   //print("Insira o comando.\n>");						//Apresenta esta mensagem inicial no termite para o utilizador
@@ -1450,10 +1498,37 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)	//Call
     }
 }
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim){ //Callback do Período do Timer: Executado quando o contador do Timer atinge o valor de Auto-Reload (ARR)
-	if (htim == &htim3){ 				// Filtra para garantir que estamos a reagir apenas ao Timer 3
+//	if (htim == &htim3){ 				// Filtra para garantir que estamos a reagir apenas ao Timer 3
+//		//ov = 1; 						// Sinaliza que o período de tempo decorreu (Overflow).
+//										//As ISR devem ser o mais curtas possível!
+//	}
+	if (htim == &htim6){ 				// Filtra para garantir que estamos a reagir apenas ao Timer 3
 		ov = 1; 						// Sinaliza que o período de tempo decorreu (Overflow).
 										//As ISR devem ser o mais curtas possível!
 	}
+}
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
+	if (GPIO_Pin == ENC_A_Pin){ 				// Filtra para garantir que estamos a reagir apenas ao Timer 3
+		if(HAL_GPIO_ReadPin(ENC_B_GPIO_Port, ENC_B_Pin) == GPIO_PIN_RESET){
+			inc_pos++;
+			inc_vel++;
+			//print("+");
+		}else{
+			inc_pos--;
+			inc_vel--;
+			//print("-");
+		}
+		if(abs(inc_pos)>=960){
+			inc_pos=0;
+			if(inc_vel>0){
+				vol++;
+			}else{
+				vol--;
+			}
+			//lim=1;
+		}
+	}
+
 }
 
 //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
