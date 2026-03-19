@@ -80,6 +80,7 @@ void SystemClock_Config(void);
 uint8_t memory[MEM]={1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20}; //Buffer que atua como memória virtual para os comandos MR e MW
 const char delim[MAX_DELIM] = " ";										  //Declaração e inicialização dos caracteres delimitadores
 char input[MAX_CHAR] = "";												  //Declaração e inicialização do buffer de entrada da uart
+volatile char rx_buff[MAX_CHAR];
 volatile uint8_t data_ready = 0;										  //Declaração e inicialização da flag de receção da uart
 int pins[16];															  //Declaração e inicialização do vetor de pinos ativos pelos comandos
 volatile uint8_t ov;													  //Variável para a flag de interrupção genérica (overflow)
@@ -87,6 +88,7 @@ volatile int inc_pos=0;
 volatile int inc_vel=0;
 volatile int lim=0;
 volatile int vol=0;
+volatile int dir=0;
 int CS=0;																  //Variável de estado do Sistema de Controlo (0:Reset, 1:Config, 2:Manual, 3:Auto)
 //int last_CS=0;
 int EN=0;																  //Variável de ativação (Enable) dos motores (0: Desligado, 1: Ligado)
@@ -704,12 +706,17 @@ void enable(int e){
 		HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_2);
 		HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_3);
 		HAL_TIM_Base_Start_IT(&htim6);		//início do timer para o PWM
+		HAL_GPIO_WritePin(GPIOB, ENABLE_Pin, GPIO_PIN_SET);
+		HAL_GPIO_WritePin(GPIOB, ENABLE2_Pin, GPIO_PIN_SET);
+
 	}else{								// Se o comando for para desativar o motor (EN = 0)
 		// Interrompe imediatamente os sinais PWM para parar a alimentação dos motores
 		HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_1);
 		HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_2);
 		HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_3);
 		HAL_TIM_Base_Stop_IT(&htim6);		//início do timer para o PWM
+		HAL_GPIO_WritePin(GPIOB, ENABLE_Pin,GPIO_PIN_RESET);
+		HAL_GPIO_WritePin(GPIOB, ENABLE2_Pin,GPIO_PIN_RESET);
 	}
 }
 //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -734,14 +741,14 @@ void execute(Tokens in){ //Função execute
 
 		case CMD_HELP:									// Comando '?' - Lista de ajuda
 			print("Comandos disponiveis:\n");
-			print("?                                                                              - Fornece uma lista dos comandos validos.\n");
-			print("MR <addr> <length>                                         - Ler <length> bytes a partir de endereco de memoria <addr>h\n");
-			print("MW <addr> <length> <byte>                          - Escrever <length> bytes a partir de endereco de memoria <addr>h com o valor <byte>h\n");
-			print("PI <portAddr> <pinsMap>                              - Programar os pinos <pinsMap> da porta <portAddr> como entrada\n");
-			print("PO <portAddr> <pinsMap>                            - Programar os pinos <pinsMap> da porta <portAddr> como saida\n");
-			print("RD <portAddr> <pinsMap>                            - Ler os pinos <pinsMap> da porta <portAddr>\n");
-			print("WD <portAddr> <pinsMap> <pinValues> - Escrever nos bits <pinsMap> da porta <portAddr>, os valores <pinValues>\n");
-			print("PWM <dutyCycle>                                            - Duty-cycle de <dutyCycle>%\n");
+			print("?                                                                              - Fornece uma lista dos comandos validos.\r\n");
+			print("MR <addr> <length>                                         - Ler <length> bytes a partir de endereco de memoria <addr>h\r\n");
+			print("MW <addr> <length> <byte>                          - Escrever <length> bytes a partir de endereco de memoria <addr>h com o valor <byte>h\r\n");
+			print("PI <portAddr> <pinsMap>                              - Programar os pinos <pinsMap> da porta <portAddr> como entrada\r\n");
+			print("PO <portAddr> <pinsMap>                            - Programar os pinos <pinsMap> da porta <portAddr> como saida\r\n");
+			print("RD <portAddr> <pinsMap>                            - Ler os pinos <pinsMap> da porta <portAddr>\r\n");
+			print("WD <portAddr> <pinsMap> <pinValues> - Escrever nos bits <pinsMap> da porta <portAddr>, os valores <pinValues>\r\n");
+			print("PWM <dutyCycle>                                            - Duty-cycle de <dutyCycle>%\r\n");
 			print("RA <addr>                                                           - Ler o canal <addr> de um ADC pre-determinado");
 			break;
 
@@ -749,7 +756,7 @@ void execute(Tokens in){ //Função execute
 			snprintf(resposta, MAX_OUT,					//Apresentação da resposta ao comando
 					"Ler %d bytes a partir de endereco de memoria %04Xh ", in.data[2], in.data[1]);
 			print(resposta);							//Escrita da resposta
-			sprintf(temp, "\nRead: ");
+			sprintf(temp, "\r\nRead: ");
 						strcat(out, temp);
 			for(i=0; i<in.data[2]; i++){				// Ciclo para ler a memória virtual (vetor 'memory')
 														// Proteção contra leitura fora de limites (Memory Wrap-around)
@@ -763,7 +770,7 @@ void execute(Tokens in){ //Função execute
 			snprintf(resposta, MAX_OUT,					//Apresentação da resposta ao comando
 					"Escrever %d bytes a partir de endereco de memoria %04Xh com o valor %02Xh ", in.data[2], in.data[1], in.data[3]);
 			print(resposta);							//Escrita da resposta
-			sprintf(temp, "\nWritten: ");
+			sprintf(temp, "\r\nWritten: ");
 						strcat(out, temp);				// Concatena na string principal
 			// Ciclo para escrever na memória virtual (vetor 'memory')
 			for(i=0; i<in.data[2]; i++){
@@ -789,14 +796,14 @@ void execute(Tokens in){ //Função execute
 			port = select_port(in.data[1]);				// Obtém o endereço real do hardware (ex: GPIOA)
 			if(port.channel == NULL){					//Se não conseguir, diz que a porta está fora do alcance
 				snprintf(resposta, MAX_OUT,	//Apresentação da resposta ao comando
-						"\nPORTA FORA DE ALCANCE");
+						"\r\nPORTA FORA DE ALCANCE");
 				print(resposta);			//Escrita da resposta
 				return;
 			}
 			// Valida se os pinos solicitados não são restritos
 			if(pins_restricted(port,in.data[2])){
 				snprintf(resposta, MAX_OUT,	//Apresentação da resposta ao comando
-						"\nPINOS RESTRITOS!");
+						"\r\nPINOS RESTRITOS!");
 				print(resposta);			//Escrita da resposta
 				return;
 			}
@@ -807,7 +814,7 @@ void execute(Tokens in){ //Função execute
 			GPIO_InitStruct.Pull = GPIO_PULLDOWN;		//Garante o nível lógico 0 se nada estiver ligado
 			HAL_GPIO_Init(port.channel, &GPIO_InitStruct); // Aplica a configuração do hardware: escreve nos registos do periférico (port.channel) as definições do modo e dos pinos guardados na estrutura GPIO_InitStruct
 			snprintf(resposta, MAX_OUT,						//Apresentação da resposta ao comando
-					"\nPinos definidos como entrada.");
+					"\r\nPinos definidos como entrada.");
 			print(resposta);								//Escrita da resposta
 			break;
 
@@ -1088,12 +1095,13 @@ void execute(Tokens in){ //Função execute
 						__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, 0);   // Canal Direção -
 						HAL_Delay(1);
 						__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, pwm); // Canal Direção +
-
+						dir=1;
 					} else { 							// Lógica para o sentido inverso (Reverse / -)
 						// Desativa o Canal 1 e define o sinal PWM no Canal 2 para inverter a polaridade na Ponte-H
 					    __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 0);   // Canal Direção +
 					    HAL_Delay(1);
 					    __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, pwm); // Canal Direção -
+					    dir=0;
 					}
 				}else{
 					snprintf(resposta, MAX_OUT,			// Erro se o utilizador tentar definir mais de 100% de PWM
@@ -1192,16 +1200,22 @@ int main_loop(void){
 		memset(input, 0, MAX_CHAR); 					//Limpa o buffer de entrada para evitar resíduos de comandos anteriores (por segurança)
 
 		// Reinício da escuta da UART
-		if(start_scan(input) != HAL_OK){				// Tenta reativar o modo de receção
+		if(start_scan(rx_buff) != HAL_OK){				// Tenta reativar o modo de receção
 		 __HAL_UART_CLEAR_OREFLAG(&huart3);				//Limpa o erro de Overrun para desbloquear o periférico
-		 start_scan(input);								// Segunda tentativa de arranque após limpeza do erro
+		 start_scan(rx_buff);								// Segunda tentativa de arranque após limpeza do erro
 		}
 		return 1;
+	}
+	if(data_ready == 2){
+		if(start_scan(rx_buff) != HAL_OK){				// Tenta reativar o modo de receção
+		 __HAL_UART_CLEAR_OREFLAG(&huart3);				//Limpa o erro de Overrun para desbloquear o periférico
+		 start_scan(rx_buff);								// Segunda tentativa de arranque após limpeza do erro
+		}
 	}
 	if (ov){											// Verifica se a flag de overflow está ativa
 		ov = 0;											// Reset da flag (acknowledge)
 		char resposta[MAX_OUT] = {};						//Resposta ao utilizador
-	  	//HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_0);			// Indicação visual que o código não "encravou" e o loop principal continua a correr
+	  	HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_0);			// Indicação visual que o código não "encravou" e o loop principal continua a correr
 		float PosRad = (inc_pos*(2.0*M_PI))/960.0;
 		float PosGra = (inc_pos*360.0)/960.0;
 
@@ -1224,7 +1238,7 @@ int main_loop(void){
 void state_machine(){
 	switch(CS){			//Switch Case para todos os casos
 	case 0:				//Estado 0: Reset
-		print("\n\nRESET- - - - - - - - - - -");
+		print("\r\n\r\nRESET- - - - - - - - - - -");
 		/*
 		Desativa os pinos de enable, de definição de sentido de rotação e de sinal de PWM;
 		Modo de limpeza das configurações iniciais do utilizador (período de amostragem – 10 ms; tipo de leitura - leitura de posição; reset de posição, PWM - duty cycle 0%, valores dos parâmetros PID – todos a zero);
@@ -1236,8 +1250,8 @@ void state_machine(){
 		CS = 1;		//Por defeito, passamos automaticamente do estado 0 para o estado 1
 		break;
 	case 1:				//Estado 1: Configuração
-		print("\n\nCONFIG- - - - - - - - - - -");
-		print("\n[CONFIG]>");
+		print("\r\n\r\nCONFIG- - - - - - - - - - -");
+		print("\r\n[CONFIG]>");
 		/*
 		Este modo serve para o utilizador configurar diferentes variáveis necessárias para o controlo:
 			Configuração do período de amostragem (utilizador);
@@ -1259,13 +1273,13 @@ void state_machine(){
 		enable(0);
 		while (CS==1){		// Executa o loop de polling de comandos pela UART enquanto estiver neste estado
 			if(main_loop()){
-			print("\n[CONFIG]>");			// Prompt visual para o utilizador
+			print("\r\n[CONFIG]>");			// Prompt visual para o utilizador
 			}
 		}
 		break;
 	case 2:				//Estado 2: Modo Manual
-		print("\n\nMANUAL- - - - - - - - - - -");
-		print("\n[MANUAL]>");
+		print("\r\n\r\nMANUAL- - - - - - - - - - -");
+		print("\r\n[MANUAL]>");
 		/*
 		Este modo serve para leitura de posição e velocidade angular a partir dos valores do encoder (funções a definir no objetivo 2) e para manipulação contínua e direta do sinal de PWM (funções a definir no objetivo 3);
 		Neste modo é possível:
@@ -1284,13 +1298,13 @@ void state_machine(){
 //		}
 		while (CS==2){		// Permite o controlo direto e a leitura de sensores sem malha fechada
 			if(main_loop()){
-			print("\n[MANUAL]>");
+			print("\r\n[MANUAL]>");
 			}
 		}
 		break;
 	case 3:				//Estado 3: Modo Automático
-		print("\n\nAUTO- - - - - - - - - - -");
-		print("\n[AUTO]>");
+		print("\r\n\r\nAUTO- - - - - - - - - - -");
+		print("\r\n[AUTO]>");
 		/*
 		Este modo visa o teste do controlo do disco usando o controlo PID implementado. O programa a realizar para este estado será definido no objetivo 6;
 		Após a ativação do estado 3 (Modo automático), o sistema deve ligar o Enable do motor (EN=1) e arrancar o teste em malha fechada;
@@ -1311,7 +1325,7 @@ void state_machine(){
 		enable(1);
 		while (CS==3){ //Enquanto ficarmos neste estado
 			if(main_loop()){
-			print("\n[AUTO]>");
+			print("\r\n[AUTO]>");
 			}
 			// Se o motor for desativado pelo comando enable (EN=0), regressa ao modo de configuração (1) por segurança
 			if(!EN){
@@ -1396,7 +1410,7 @@ Error_Handler();
   //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
   //print("Insira o comando.\n>");						//Apresenta esta mensagem inicial no termite para o utilizador
   //printf(">");
-  start_scan(input);									//Início da receção pela usart3
+  start_scan(rx_buff);									//Início da receção pela usart3
   //uint16_t next_CCR = TIM3_CCR;
   //__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, 0);    //Define o valor inicial do Duty Cycle para 0 (0%)
   //(&htim3, TIM_CHANNEL_3);			//Ativa efetivamente a geração do sinal PWM no pino físico
@@ -1413,26 +1427,6 @@ Error_Handler();
 	  //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 	  //Bloco de processamento de comandos (consumidor)
 	  state_machine();									//Chama a máquina de estados
-//	  if(data_ready == 1){ 								//Verifica se a flag de receção foi ativada
-//		  upperCase(input);								//Se foi, garante que todos os comandos recebidos ficam apenas em maiúsculas (por causa do Case Sensitivity)
-//		  // 1. parse(): Divide a string em tokens e valida a sintaxe (Análise Léxica/Sintática)
-//		  // 2. execute(): Recebe o resultado do parse e atua no hardware (Semântica/Execução)
-//		  execute(parse(input, delim));
-//
-//		  //print("\n>");									// Imprime o prompt para indicar ao utilizador que o sistema está pronto para o próximo comando
-//		  //Limpeza e Preparação para o próximo ciclo
-//		  data_ready = 0;								//Reset da flag de receção
-//		  memset(input, 0, MAX_CHAR); 					//Limpa o buffer de entrada para evitar resíduos de comandos anteriores (por segurança)
-//		  // Reinício da escuta da UART
-//		  if(start_scan(input) != HAL_OK){				// Tenta reativar o modo de receção
-//			  __HAL_UART_CLEAR_OREFLAG(&huart3);		//Limpa o erro de Overrun para desbloquear o periférico
-//			  start_scan(input);						// Segunda tentativa de arranque após limpeza do erro
-//		  }
-//	    }
-//	  if (ov){											// Verifica se a flag de overflow está ativa
-//	  		  ov = 0;									// Reset da flag (acknowledge)
-//	  	  	  HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_0);	// Indicação visual que o código não "encravou" e o loop principal continua a correr
-//	  	  }
   }
   /* USER CODE END 3 */
 }
@@ -1488,13 +1482,47 @@ void SystemClock_Config(void)
 }
 
 /* USER CODE BEGIN 4 */
+volatile int comp = 0;
 //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)	//Callback de Evento de Receção UART: Executado automaticamente pelo hardware
 {
-
+char resposta[MAX_CHAR];
     if (huart->Instance == USART3){		//Verifica se a interrupção veio da USART3 (ligada ao ST-Link/Terminal do PC)
-        input[Size] = '\0';				//Coloca o terminador nulo ('\0') exatamente na posição após o último caractere recebido
-        data_ready = 1; 				//Ativa a flag de sinalização. O loop principal (while(1)) verá este '1' e saberá que pode começar a processar o comando.
+        //input[Size] = '\0';				//Coloca o terminador nulo ('\0') exatamente na posição após o último caractere recebido
+    	data_ready = 2;
+    	int inc = (5*__HAL_TIM_GET_AUTORELOAD(&htim3))/100;
+        if(rx_buff[0]=='\\'){
+        	if(dir){
+        		comp = __HAL_TIM_GET_COMPARE(&htim3, TIM_CHANNEL_1);
+        		comp -= inc;
+        		__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, comp);
+        	}else{
+        		comp = __HAL_TIM_GET_COMPARE(&htim3, TIM_CHANNEL_2);
+        		comp -= inc;
+        		__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, comp);
+        	}
+        	snprintf(resposta, MAX_OUT,					// Formata a resposta para mostrar o índice do ganho e o valor original com ponto (ex: 3.4)
+        					"\nPWM: %d", (comp*100/__HAL_TIM_GET_AUTORELOAD(&htim3))+1);
+        	print(resposta);
+        }else if(rx_buff[0]=='/'){
+        	if(dir){
+        		comp = __HAL_TIM_GET_COMPARE(&htim3, TIM_CHANNEL_1);
+        		comp += inc;
+        		__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, comp);
+        	}else{
+        		comp = __HAL_TIM_GET_COMPARE(&htim3, TIM_CHANNEL_2);
+        		comp += inc;
+        		__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, comp);
+        	}
+        	snprintf(resposta, MAX_OUT,					// Formata a resposta para mostrar o índice do ganho e o valor original com ponto (ex: 3.4)
+        					"\nPWM: %d", (comp*100/__HAL_TIM_GET_AUTORELOAD(&htim3))+1);
+        	print(resposta);
+        }else{
+        	strcat(input, rx_buff);
+        	if(rx_buff[0]=='\n'){
+        		data_ready = 1; 				//Ativa a flag de sinalização. O loop principal (while(1)) verá este '1' e saberá que pode começar a processar o comando.
+        	}
+        }
     }
 }
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim){ //Callback do Período do Timer: Executado quando o contador do Timer atinge o valor de Auto-Reload (ARR)
@@ -1510,13 +1538,13 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim){ //Callback do Perí
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
 	if (GPIO_Pin == ENC_A_Pin){ 				// Filtra para garantir que estamos a reagir apenas ao Timer 3
 		if(HAL_GPIO_ReadPin(ENC_B_GPIO_Port, ENC_B_Pin) == GPIO_PIN_RESET){
-			inc_pos++;
-			inc_vel++;
-			//print("+");
-		}else{
 			inc_pos--;
 			inc_vel--;
 			//print("-");
+		}else{
+			inc_pos++;
+			inc_vel++;
+			//print("+");
 		}
 		if(abs(inc_pos)>=960){
 			inc_pos=0;
@@ -1526,6 +1554,11 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
 				vol--;
 			}
 			//lim=1;
+		}
+		if(abs(vol) > 10){
+			enable(0);
+			print("limite de voltas");
+			vol = 0;
 		}
 	}
 

@@ -63,6 +63,10 @@ void Error_Handler(void);
 #define PWM_GPIO_Port GPIOB
 #define ENC_B_Pin GPIO_PIN_12
 #define ENC_B_GPIO_Port GPIOB
+#define ENABLE_Pin GPIO_PIN_13
+#define ENABLE_GPIO_Port GPIOB
+#define ENABLE2_Pin GPIO_PIN_15
+#define ENABLE2_GPIO_Port GPIOB
 #define MOT_B_Pin GPIO_PIN_7
 #define MOT_B_GPIO_Port GPIOC
 #define ENC_A_Pin GPIO_PIN_15
