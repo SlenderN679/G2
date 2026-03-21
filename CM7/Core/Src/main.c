@@ -40,6 +40,8 @@
 #define HSEM_ID_0 (0U) /* HW semaphore 0*/
 #endif
 
+#define MAX_CHAR 32			//Definição do limite máximo do tamanho da string de entrada
+
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -51,13 +53,19 @@
 
 /* USER CODE BEGIN PV */
 
+extern UART_HandleTypeDef huart3; // Garante que a UART3 é visível
+uint8_t rx_byte;                // Para receber 1 byte de cada vez
+char cmd_buffer[MAX_CHAR];      // Buffer para os comandos (CS=1, etc)
+int cmd_idx = 0;                // Índice do buffer
+
+float PWM = 0;                  // Para funcionar na HAL_UART_RxCpltCallback
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 /* USER CODE BEGIN PFP */
 //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-#define MAX_CHAR 32			//Definição do limite máximo do tamanho da string de entrada
 #define MAX_STRING 10		//Definição do limite máximo dos tokens da string de entrada
 #define MAX_DELIM 10		//Definição do limite máximo dos caracteres delimitadores
 #define MAX_OUT 512			//Definição do tamanho máximo da resposta ao utilizador
@@ -69,8 +77,8 @@ void SystemClock_Config(void);
 
 #define MAX_ADC 10			//Timeout de 10ms
 
-#define VOL 10
-#define MAX_VOL 960*VOL
+#define VOL 10				//Nº de voltas máximas
+#define MAX_VOL 960*VOL		//960 pulsos para os dois sensores A e B, cada um com um máximo de 10 voltas
 //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 /* USER CODE END PFP */
 
@@ -80,19 +88,19 @@ void SystemClock_Config(void);
 uint8_t memory[MEM]={1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20}; //Buffer que atua como memória virtual para os comandos MR e MW
 const char delim[MAX_DELIM] = " ";										  //Declaração e inicialização dos caracteres delimitadores
 char input[MAX_CHAR] = "";												  //Declaração e inicialização do buffer de entrada da uart
-volatile char rx_buff[MAX_CHAR];
+volatile char rx_buff[MAX_CHAR];										  //Buffer de receção de caracteres
 volatile uint8_t data_ready = 0;										  //Declaração e inicialização da flag de receção da uart
 int pins[16];															  //Declaração e inicialização do vetor de pinos ativos pelos comandos
 volatile uint8_t ov;													  //Variável para a flag de interrupção genérica (overflow)
-volatile int inc_pos=0;
-volatile int inc_vel=0;
-volatile int lim=0;
-volatile int vol=0;
-volatile int dir=0;
+volatile int inc_pos=0;													  //Variável para incremento da posição
+volatile int inc_vel=0;													  //Variável para incremento da velocidade
+volatile int lim=0;														  //Variável para definir o limite das voltas (10)
+volatile int vol=0;														  //Variável para voltas
+volatile int dir=0;														  //Variável de direção
 int CS=0;																  //Variável de estado do Sistema de Controlo (0:Reset, 1:Config, 2:Manual, 3:Auto)
 //int last_CS=0;
 int EN=0;																  //Variável de ativação (Enable) dos motores (0: Desligado, 1: Ligado)
-uint8_t Per = 499;
+uint8_t Per = 499;														  //Período do timer6, Auto Reload Register
 
 typedef enum{                           // Enumeração dos tipos de parâmetros esperados na análise sintática
     /*HEX = 0,                          // Parâmetro hexadecimal
@@ -235,8 +243,8 @@ void upperCase(char string[]){					//Função de uniformalização de uma string
 }
 //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-int pins[16]={}; 													//Declaração e inicialização do array de pinos
-int n=0; 															//Declaração e inicialização do índice do array
+int pins[16]={}; 													//Declaração e inicialização do vetor de pinos
+int n=0; 															//Declaração e inicialização do índice do vetor
 
 Error validate(char par[], int digits, int type, int *out, int hex){ 		//Função para validar os parâmetros implementados pelo utilizador
 	int i = 0; 														//Declaração e inicialização do iterador
@@ -250,9 +258,9 @@ Error validate(char par[], int digits, int type, int *out, int hex){ 		//Funçã
 		}
 		max = pow(16,digits);										//Valor máximo do parâmetro
 		if(hex){
-			num = (uint32_t)strtoul(par, NULL, 16);						//Conversão da string para um valor numérico usando a base 16 (Hexadecimal)
+			num = (uint32_t)strtoul(par, NULL, 16);					//Conversão da string para um valor numérico usando a base 16 (Hexadecimal)
 		}else{
-			num = (uint32_t)strtoul(par, NULL, 10);						//Conversão da string para um valor numérico usando a base 10 (Decimal)
+			num = (uint32_t)strtoul(par, NULL, 10);					//Conversão da string para um valor numérico usando a base 10 (Decimal)
 		}
 	}
 	if(num<max){													//Se o parâmetro de entrada não ultrapassa o tamanho máximo
@@ -699,24 +707,24 @@ Tokens parse(char in[MAX_CHAR], const char delim[MAX_DELIM]){		//Função de tok
 	 return identify(strings, count);								// Passa o vetor resultante para a Análise Sintática (identify)
 }
 void enable(int e){
-	EN=e;
+	EN=e;								//Variável de enable
 	if(EN){								// Se o comando for para ativar o motor (EN = 1)
 		// Inicia a geração de sinais PWM nos canais do Timer 3 para controlar a Ponte-H
-		HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
-		HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_2);
-		HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_3);
-		HAL_TIM_Base_Start_IT(&htim6);		//início do timer para o PWM
-		HAL_GPIO_WritePin(GPIOB, ENABLE_Pin, GPIO_PIN_SET);
-		HAL_GPIO_WritePin(GPIOB, ENABLE2_Pin, GPIO_PIN_SET);
+		HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);	//Canal 1 do timer 3
+		HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_2);	//Canal 2 do timer 3
+		HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_3);	//Canal 3 do timer 3
+		HAL_TIM_Base_Start_IT(&htim6);		//Início do timer 6 para o PWM
+		HAL_GPIO_WritePin(GPIOB, ENABLE_Pin, GPIO_PIN_SET);	//Para o pino PB13
+		HAL_GPIO_WritePin(GPIOB, ENABLE2_Pin, GPIO_PIN_SET);//Para o pino PB15
 
 	}else{								// Se o comando for para desativar o motor (EN = 0)
 		// Interrompe imediatamente os sinais PWM para parar a alimentação dos motores
-		HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_1);
-		HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_2);
-		HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_3);
-		HAL_TIM_Base_Stop_IT(&htim6);		//início do timer para o PWM
-		HAL_GPIO_WritePin(GPIOB, ENABLE_Pin,GPIO_PIN_RESET);
-		HAL_GPIO_WritePin(GPIOB, ENABLE2_Pin,GPIO_PIN_RESET);
+		HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_1);	//Canal 1 do timer 3
+		HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_2);	//Canal 2 do timer 3
+		HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_3);	//Canal 3 do timer 3
+		HAL_TIM_Base_Stop_IT(&htim6);		//Início do timer 6 para o PWM
+		HAL_GPIO_WritePin(GPIOB, ENABLE_Pin,GPIO_PIN_RESET);	//Para o pino PB13
+		HAL_GPIO_WritePin(GPIOB, ENABLE2_Pin,GPIO_PIN_RESET);	//Para o pino PB15
 	}
 }
 //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -750,6 +758,15 @@ void execute(Tokens in){ //Função execute
 			print("WD <portAddr> <pinsMap> <pinValues> - Escrever nos bits <pinsMap> da porta <portAddr>, os valores <pinValues>\r\n");
 			print("PWM <dutyCycle>                                            - Duty-cycle de <dutyCycle>%\r\n");
 			print("RA <addr>                                                           - Ler o canal <addr> de um ADC pre-determinado");
+
+			print("CS <dig>                                                    - Definicao do estado de funcionamento da maquina de estados");
+			print("EN <dig>                                                     - Ativação dos motores");
+			print("HW <uint>                                                    - Periodo de amostragem");
+			print("RT <dig>                                                      - Configuracao do tipo de leitura");
+			print("R <dig> <uint>                                                - Leitura");
+			print("PWM <signval>                                                  - Pulse Width Modulation em tensao normalizada");
+			print("RESPOS                                                         - Reinicializacao da posicao 0 do disco");
+			print("PID <dig> <float>                                              - Configuracao de variaveis e parametros do controlador PID");
 			break;
 
 		case CMD_MR:									//Memory Read
@@ -807,8 +824,9 @@ void execute(Tokens in){ //Função execute
 				print(resposta);			//Escrita da resposta
 				return;
 			}
-			start_GPIO_CLK(in.data[1]);
-			// Configuração física via HAL
+			start_GPIO_CLK(in.data[1]);				//Ativar o clock da porta respetiva do GPIO
+
+			// Configuração física por HAL
 			GPIO_InitStruct.Pin = in.data[2];			//Máscara de bits
 			GPIO_InitStruct.Mode = GPIO_MODE_INPUT;		//Configurar os pinos para entrada
 			GPIO_InitStruct.Pull = GPIO_PULLDOWN;		//Garante o nível lógico 0 se nada estiver ligado
@@ -998,7 +1016,7 @@ void execute(Tokens in){ //Função execute
 //											HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_3);
 //											HAL_TIM_Base_Stop_IT(&htim6);		//início do timer para o PWM
 //										}
-					enable(in.data[1]);
+					enable(in.data[1]);	//Ativar o motor com enable
 					//HAL_GPIO_WritePin(GPIOB, GPIO_PIN_MOTOR, (EN==1) ? GPIO_PIN_SET : GPIO_PIN_RESET);
 
 					// Formatação da mensagem final indicando o novo estado real dos motores
@@ -1099,9 +1117,9 @@ void execute(Tokens in){ //Função execute
 					} else { 							// Lógica para o sentido inverso (Reverse / -)
 						// Desativa o Canal 1 e define o sinal PWM no Canal 2 para inverter a polaridade na Ponte-H
 					    __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 0);   // Canal Direção +
-					    HAL_Delay(1);
+					    HAL_Delay(1);									   //Um bocadinho de delay
 					    __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, pwm); // Canal Direção -
-					    dir=0;
+					    dir=0;											   //Reiniciar a direção
 					}
 				}else{
 					snprintf(resposta, MAX_OUT,			// Erro se o utilizador tentar definir mais de 100% de PWM
@@ -1121,8 +1139,8 @@ void execute(Tokens in){ //Função execute
 			print(resposta);							// Envia o feedback para o terminal série
 			int respos[]={1,2,-1,-1};					// Define que o reset da posição é permitido em Config (1) ou Manual (2)
 			if(!check_state(respos)){					// Verifica se o sistema está num dos estados autorizados
-				inc_pos=0;
-				inc_vel=0;
+				inc_pos=0;								//Reiniciar a variável de incremento da posição
+				inc_vel=0;								//Reiniciar a variável de incremento da velocidade
 			}else{
 				snprintf(resposta, MAX_OUT,				// Erro se o utilizador tentar dar reset durante o modo Automático
 						"\nESTADO ERRADO!");
@@ -1202,33 +1220,33 @@ int main_loop(void){
 		// Reinício da escuta da UART
 		if(start_scan(rx_buff) != HAL_OK){				// Tenta reativar o modo de receção
 		 __HAL_UART_CLEAR_OREFLAG(&huart3);				//Limpa o erro de Overrun para desbloquear o periférico
-		 start_scan(rx_buff);								// Segunda tentativa de arranque após limpeza do erro
+		 start_scan(rx_buff);							// Segunda tentativa de arranque após limpeza do erro
 		}
 		return 1;
 	}
 	if(data_ready == 2){
 		if(start_scan(rx_buff) != HAL_OK){				// Tenta reativar o modo de receção
 		 __HAL_UART_CLEAR_OREFLAG(&huart3);				//Limpa o erro de Overrun para desbloquear o periférico
-		 start_scan(rx_buff);								// Segunda tentativa de arranque após limpeza do erro
+		 start_scan(rx_buff);							// Segunda tentativa de arranque após limpeza do erro
 		}
 	}
 	if (ov){											// Verifica se a flag de overflow está ativa
 		ov = 0;											// Reset da flag (acknowledge)
-		char resposta[MAX_OUT] = {};						//Resposta ao utilizador
+		char resposta[MAX_OUT] = {};					//Resposta ao utilizador
 	  	HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_0);			// Indicação visual que o código não "encravou" e o loop principal continua a correr
-		float PosRad = (inc_pos*(2.0*M_PI))/960.0;
-		float PosGra = (inc_pos*360.0)/960.0;
+		float PosRad = (inc_pos*(2.0*M_PI))/960.0;		//Fórmula da posição em radianos
+		float PosGra = (inc_pos*360.0)/960.0;			//Fórmula da posição em graus
 
-		float pulse = (float)inc_vel/(__HAL_TIM_GET_AUTORELOAD(&htim6)/1000.0);
-		float VelRad = (pulse*(2.0*M_PI))/960.0;
-		float VelGra = (pulse*60.0)/960.0;
-		inc_vel=0;
+		float pulse = (float)inc_vel/(__HAL_TIM_GET_AUTORELOAD(&htim6)/1000.0);		//Nº de pulsos por segundo
+		float VelRad = (pulse*(2.0*M_PI))/960.0;				//Fórmula da velocidade em radianos por segundo
+		float VelGra = (pulse*60.0)/960.0;						//Fórmula da velocidade em RPM
+		inc_vel=0;												//Reset da velocidade
 		snprintf(resposta, MAX_OUT,					// Formata a resposta para mostrar o índice do ganho e o valor original com ponto (ex: 3.4)
 				"\nPos: %0.3f rad | %0.3f deg + %d voltas\nVel: %0.3f rad/s | %0.3f rpm\n", PosRad, PosGra, vol, VelRad, VelGra);
 		print(resposta);
 	}
-	if(lim){
-		lim=0;
+	if(lim){										//Se atingiu-se o limite de voltas
+		lim=0;										//Reinicia-se a variável de limite
 		print("Limite de voltas atingido");
 	}
 	return 0;
@@ -1246,7 +1264,7 @@ void state_machine(){
 		Transição de estado: o estado 0 deve ser transitório, passando para o estado 1 (modo de configuração) após o reset das variáveis ser concluído.
 		*/
 		//EN = 0;		//Desativa o motor
-		enable(0);
+		enable(0);		//Desativa o motor
 		CS = 1;		//Por defeito, passamos automaticamente do estado 0 para o estado 1
 		break;
 	case 1:				//Estado 1: Configuração
@@ -1270,7 +1288,7 @@ void state_machine(){
 //			EN = 0;
 //		}
 		//EN = 0;			//Desativa o motor
-		enable(0);
+		enable(0);			//Desativa o motor
 		while (CS==1){		// Executa o loop de polling de comandos pela UART enquanto estiver neste estado
 			if(main_loop()){
 			print("\r\n[CONFIG]>");			// Prompt visual para o utilizador
@@ -1297,7 +1315,7 @@ void state_machine(){
 //
 //		}
 		while (CS==2){		// Permite o controlo direto e a leitura de sensores sem malha fechada
-			if(main_loop()){
+			if(main_loop()){	//Se estivermos na main_loop
 			print("\r\n[MANUAL]>");
 			}
 		}
@@ -1322,9 +1340,9 @@ void state_machine(){
 //			CS=1;
 //		}
 		//EN=1;		//Ativa o motor
-		enable(1);
+		enable(1);	//Ativar o motor
 		while (CS==3){ //Enquanto ficarmos neste estado
-			if(main_loop()){
+			if(main_loop()){	//Se estivermos na main_loop
 			print("\r\n[AUTO]>");
 			}
 			// Se o motor for desativado pelo comando enable (EN=0), regressa ao modo de configuração (1) por segurança
@@ -1410,7 +1428,7 @@ Error_Handler();
   //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
   //print("Insira o comando.\n>");						//Apresenta esta mensagem inicial no termite para o utilizador
   //printf(">");
-  start_scan(rx_buff);									//Início da receção pela usart3
+  HAL_UART_Receive_IT(&huart3, &rx_byte, 1); // Inicia a escuta de 1 em 1 byte
   //uint16_t next_CCR = TIM3_CCR;
   //__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, 0);    //Define o valor inicial do Duty Cycle para 0 (0%)
   //(&htim3, TIM_CHANNEL_3);			//Ativa efetivamente a geração do sinal PWM no pino físico
@@ -1482,47 +1500,114 @@ void SystemClock_Config(void)
 }
 
 /* USER CODE BEGIN 4 */
-volatile int comp = 0;
+//volatile int comp = 0;					//Variável para testar o incremento e o decremento do PWM
 //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)	//Callback de Evento de Receção UART: Executado automaticamente pelo hardware
-{
-char resposta[MAX_CHAR];
-    if (huart->Instance == USART3){		//Verifica se a interrupção veio da USART3 (ligada ao ST-Link/Terminal do PC)
-        //input[Size] = '\0';				//Coloca o terminador nulo ('\0') exatamente na posição após o último caractere recebido
-    	data_ready = 2;
-    	int inc = (5*__HAL_TIM_GET_AUTORELOAD(&htim3))/100;
-        if(rx_buff[0]=='\\'){
-        	if(dir){
-        		comp = __HAL_TIM_GET_COMPARE(&htim3, TIM_CHANNEL_1);
-        		comp -= inc;
-        		__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, comp);
-        	}else{
-        		comp = __HAL_TIM_GET_COMPARE(&htim3, TIM_CHANNEL_2);
-        		comp -= inc;
-        		__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, comp);
-        	}
-        	snprintf(resposta, MAX_OUT,					// Formata a resposta para mostrar o índice do ganho e o valor original com ponto (ex: 3.4)
-        					"\nPWM: %d", (comp*100/__HAL_TIM_GET_AUTORELOAD(&htim3))+1);
-        	print(resposta);
-        }else if(rx_buff[0]=='/'){
-        	if(dir){
-        		comp = __HAL_TIM_GET_COMPARE(&htim3, TIM_CHANNEL_1);
-        		comp += inc;
-        		__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, comp);
-        	}else{
-        		comp = __HAL_TIM_GET_COMPARE(&htim3, TIM_CHANNEL_2);
-        		comp += inc;
-        		__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, comp);
-        	}
-        	snprintf(resposta, MAX_OUT,					// Formata a resposta para mostrar o índice do ganho e o valor original com ponto (ex: 3.4)
-        					"\nPWM: %d", (comp*100/__HAL_TIM_GET_AUTORELOAD(&htim3))+1);
-        	print(resposta);
-        }else{
-        	strcat(input, rx_buff);
-        	if(rx_buff[0]=='\n'){
-        		data_ready = 1; 				//Ativa a flag de sinalização. O loop principal (while(1)) verá este '1' e saberá que pode começar a processar o comando.
-        	}
+//void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)	//Callback de Evento de Receção UART: Executado automaticamente pelo hardware
+//{
+//char resposta[MAX_CHAR];
+//    if (huart->Instance == USART3){			//Verifica se a interrupção veio da USART3 (ligada ao ST-Link/Terminal do PC)
+//        //input[Size] = '\0';				//Coloca o terminador nulo ('\0') exatamente na posição após o último caractere recebido
+//    	data_ready = 2;						//Não foi uma receção completa, por caracter
+//    	int inc = (5*__HAL_TIM_GET_AUTORELOAD(&htim3))/100;	// Calcula o incremento correspondente a 5% do valor máximo do Timer (ARR):(Vcc * <signval>) / 100
+//
+//    	//Decrementar o PWM (Tecla '\\')
+//        if(rx_buff[0]=='\\'){								//Se escreveu-se backslash duplo
+//        	if(dir){										// Se o motor está a rodar na direção 1 (Forward)
+//        		comp = __HAL_TIM_GET_COMPARE(&htim3, TIM_CHANNEL_1);
+//        		comp -= inc;								// Decrementa 5% no canal 1
+//        		__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, comp);
+//
+//        	}else{											// Se o motor está a rodar na direção 2 (Reverse)
+//        		comp = __HAL_TIM_GET_COMPARE(&htim3, TIM_CHANNEL_2);
+//        		comp -= inc;								// Decrementa 5% no canal 2
+//        		__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, comp);
+//        	}
+//        	snprintf(resposta, MAX_OUT,					// Formata e imprime o novo valor do PWM em percentagem
+//        					"\nPWM: %d", (comp*100/__HAL_TIM_GET_AUTORELOAD(&htim3))+1);
+//        	print(resposta);
+//
+//        //Incrementar o PWM (Tecla '/')
+//        }else if(rx_buff[0]=='/'){						//Se escreveu-se barra
+//        	if(dir){									// Se o motor está a rodar na direção 1 (Forward)
+//        		comp = __HAL_TIM_GET_COMPARE(&htim3, TIM_CHANNEL_1);
+//        		comp += inc;							// Incrementa 5% no canal 1
+//        		__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, comp);
+//
+//        	}else{										// Se o motor está a rodar na direção 2 (Reverse)
+//        		comp = __HAL_TIM_GET_COMPARE(&htim3, TIM_CHANNEL_2);
+//        		comp += inc;							// Incrementa 5% no canal 2
+//        		__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, comp);
+//        	}
+//        	snprintf(resposta, MAX_OUT,					// Formata e imprime o novo valor de PWM em percentagem
+//        					"\nPWM: %d", (comp*100/__HAL_TIM_GET_AUTORELOAD(&htim3))+1);
+//        	print(resposta);
+//
+//        //Construção dos comandos (ex: "PWM 50", "EN 1")
+//        }else{
+//        	strcat(input, rx_buff);				//Concatena-se os caracteres recebidos no buffer 'input'
+//        	if(rx_buff[0]=='\n'){				// Quando recebe-se o 'Backslash n' (\n), sinaliza ao loop principal (while(1)no USER CODE 3) que o comando está pronto a ser processado
+//        		data_ready = 1; 				//Ativa-se a flag de sinalização. O loop principal (while(1)) verá este '1' e saberá que pode começar a processar o comando.
+//        	}
+//        }
+//    }
+//}
+
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) { //Função de Callback chamada automaticamente quando a UART recebe um byte.
+
+    if (huart->Instance == USART3) { // Verifica se a interrupção veio especificamente da USART3 (ligada ao ST-Link/Terminal)
+        char c = (char)rx_byte;		// Converte o byte recebido para o tipo caractere
+        char msg_local[MAX_OUT]; 	// Buffer auxiliar para formatar strings de saída
+
+        // 1. Atalhos imediatos sem o uso do enter
+
+        // Se a tecla for '/', incrementa o ciclo de funcionamento (Duty Cycle) do PWM
+        if (c == '/') {
+            PWM += 5.0f; 	// Aumenta o PWM em 5%
+            if (PWM > 100.0f) PWM = 100.0f;	// Garante que não ultrapassa o limite de 100%
+
+
+            // Formata a mensagem com o novo valor (%.0f retira as casas decimais)
+            snprintf(msg_local, MAX_OUT, "\r\nPWM: %.0f%%\r\n> ", PWM);
+            print(msg_local);			// Envia a confirmação para o terminal
         }
+        // Se a tecla for '\', decrementa o ciclo de funcionamento do PWM
+        else if (c == '\\') {
+            PWM -= 5.0f;			// Diminui o PWM em 5%
+            if (PWM < -100.0f) PWM = -100.0f;			// Garante que não desce abaixo de -100%
+            snprintf(msg_local, MAX_OUT, "\r\nPWM: %.0f%%\r\n> ", PWM);
+            print(msg_local);							// Envia a confirmação para o terminal
+        }
+
+        // 2. Processamento de comandos de texto: Esperam pelo Enter (\r)
+
+        // Deteta se o utilizador escreveu \r ou \n, dependendo do terminal
+        else if (c == '\r' || c == '\n') {
+            if (cmd_idx > 0) {	// Só processa se o buffer não estiver vazio
+                cmd_buffer[cmd_idx] = '\0';			// Adiciona o terminador de string (null terminator)
+
+                // Chama-se a função de análise sintática para processar o comando (ex: "CS 2")
+                // Passa-se o endereço de PWM (&PWM) para que a função o possa alterar
+                identify(cmd_buffer, &PWM);
+                cmd_idx = 0;			// Reinicia-se o índice do buffer para o próximo comando
+                print("\r\n> ");		// Imprime-se um novo prompt para o utilizador
+            }
+        }
+
+        //3. Recolha de caracteres e eco
+        else {
+        	// Verifica se ainda há espaço no buffer para evitar overflow
+            if (cmd_idx < MAX_CHAR - 1) {
+                cmd_buffer[cmd_idx++] = c;		// Guarda o caractere e incrementa o índice
+
+                // Faz o "Eco": devolve o caractere à UART para que o utilizador veja o que está a escrever no ecrã do PuTTY
+                HAL_UART_Transmit(&huart3, &rx_byte, 1, 10);
+            }
+        }
+        //4. Reativação da interrupção
+
+        // Prepara a UART para receber o próximo byte por interrupção (modo IT).
+        // Sem esta linha, o código apenas receberia um único caractere e pararia.
+        HAL_UART_Receive_IT(&huart3, &rx_byte, 1);
     }
 }
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim){ //Callback do Período do Timer: Executado quando o contador do Timer atinge o valor de Auto-Reload (ARR)
@@ -1530,35 +1615,43 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim){ //Callback do Perí
 //		//ov = 1; 						// Sinaliza que o período de tempo decorreu (Overflow).
 //										//As ISR devem ser o mais curtas possível!
 //	}
-	if (htim == &htim6){ 				// Filtra para garantir que estamos a reagir apenas ao Timer 3
+	if (htim == &htim6){ 				// Filtro para garantir que estamos a reagir apenas ao Timer 6
 		ov = 1; 						// Sinaliza que o período de tempo decorreu (Overflow).
 										//As ISR devem ser o mais curtas possível!
 	}
 }
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
-	if (GPIO_Pin == ENC_A_Pin){ 				// Filtra para garantir que estamos a reagir apenas ao Timer 3
+	if (GPIO_Pin == ENC_A_Pin){ 				// Interrupção gerada pela transição de estado do Canal A do encoder
+
+		// Lê o estado do Canal B para determinar o sentido de rotação
 		if(HAL_GPIO_ReadPin(ENC_B_GPIO_Port, ENC_B_Pin) == GPIO_PIN_RESET){
+			// Sentido Anti-horário
 			inc_pos--;
 			inc_vel--;
 			//print("-");
 		}else{
+			// Sentido Horário
 			inc_pos++;
 			inc_vel++;
 			//print("+");
 		}
+
+		// A caixa redutora gera 1920 pulsos por volta considerando os canais A e B
+		// Se estivermos a contar apenas interrupções de um canal (descendentes ou ascendentes), 960 corresponde a uma volta
 		if(abs(inc_pos)>=960){
-			inc_pos=0;
+			inc_pos=0;				// Reinicia o contador de posição fracionária
 			if(inc_vel>0){
-				vol++;
+				vol++;				// Incrementa uma volta completa
 			}else{
-				vol--;
+				vol--;				// Decrementa uma volta completa
 			}
 			//lim=1;
 		}
+		// Mecanismo de proteção: se exceder 10 voltas num sentido, o motor é desativado
 		if(abs(vol) > 10){
-			enable(0);
+			enable(0);					//Desativa o motor
 			print("limite de voltas");
-			vol = 0;
+			vol = 0;					//Reinicia o nº de voltas
 		}
 	}
 
