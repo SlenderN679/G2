@@ -70,7 +70,6 @@ void SystemClock_Config(void);
 #define MAX_ADC 10			//Timeout de 10ms
 
 #define VOL 10
-#define MAX_VOL 960*VOL
 //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 /* USER CODE END PFP */
 
@@ -92,7 +91,12 @@ volatile int dir=0;
 int CS=0;																  //Variável de estado do Sistema de Controlo (0:Reset, 1:Config, 2:Manual, 3:Auto)
 //int last_CS=0;
 int EN=0;																  //Variável de ativação (Enable) dos motores (0: Desligado, 1: Ligado)
-uint8_t Per = 499;
+int R=0;
+int RT=2;
+int laps=0;
+char resposta[MAX_OUT] = {};
+
+//uint8_t Per = 499;
 
 typedef enum{                           // Enumeração dos tipos de parâmetros esperados na análise sintática
     /*HEX = 0,                          // Parâmetro hexadecimal
@@ -956,7 +960,7 @@ void execute(Tokens in){ //Função execute
 		//------------------------------------------------------------------------------------------------------------------------------------------------------------------
 		case CMD_CS:									// Execução da mudança de estado
 			snprintf(resposta, MAX_OUT,					// Prepara a string de resposta informativa para o utilizador
-					"Define o estado como %d", in.data[1]);
+					"\r\nDefine o estado como %d", in.data[1]);
 			print(resposta);							// Envia a confirmação do comando para o terminal série (UART)
 
 			if(in.data[1]<=3){ 							// Valida se o estado solicitado está no intervalo permitido (0 a 3)
@@ -967,19 +971,19 @@ void execute(Tokens in){ //Função execute
 					CS = in.data[1];					// Atualiza a variável global que controla o fluxo da máquina de estados
 				}else{
 					snprintf(resposta, MAX_OUT,			// Prepara uma mensagem de erro se a transição for inválida
-							"\nERRO DE ESTADO!");		// Bloqueia as transições não permitidas (por exemplo: Manual -> Auto diretamente não dá)
+							"\r\nERRO DE ESTADO!");		// Bloqueia as transições não permitidas (por exemplo: Manual -> Auto diretamente não dá)
 					print(resposta);					// Envia o aviso de erro ao utilizador
 				}
 			}else{
 				snprintf(resposta, MAX_OUT,				// Prepara uma mensagem caso o utilizador insira um número > 3
-						"\nERRO DE VALOR!");
+						"\r\nERRO DE VALOR!");
 				print(resposta);						// Informa que o estado solicitado não existe
 			}
 			break;										// Finaliza a execução do comando CS
 
 		case CMD_EN:									// Execução da ativação do motor (ENABLE)
 			snprintf(resposta, MAX_OUT,					// Prepara a string confirmando o valor de enable recebido
-					"Define o enable como %d", in.data[1]);
+					"\r\nDefine o enable como %d", in.data[1]);
 			print(resposta);							// Envia a confirmação para a UART
 			int en[]={2,3,-1,-1};						// Define a lista de estados permitidos para este comando (Manual e Automático)
 			if(!check_state(en)){						// Verifica se o sistema está num estado que permite ligar/desligar motores
@@ -1002,23 +1006,23 @@ void execute(Tokens in){ //Função execute
 					//HAL_GPIO_WritePin(GPIOB, GPIO_PIN_MOTOR, (EN==1) ? GPIO_PIN_SET : GPIO_PIN_RESET);
 
 					// Formatação da mensagem final indicando o novo estado real dos motores
-					snprintf(resposta, MAX_OUT, "\nMotores %s", (EN==1) ? "ATIVADOS" : "DESATIVADOS");
+					snprintf(resposta, MAX_OUT, "\r\nMotores %s", (EN==1) ? "ATIVADOS" : "DESATIVADOS");
 					print(resposta);					// Envia o feedback visual para o terminal
 				}else{
 					snprintf(resposta, MAX_OUT,			// Erro se o valor inserido não for 0 nem 1
-							"\nERRO DE VALOR!");
+							"\r\nERRO DE VALOR!");
 					print(resposta);
 				}
 			}else{
 				snprintf(resposta, MAX_OUT,				// Erro se o sistema estiver num estado em que não dê para usar EN
-						"\nESTADO ERRADO!");			// Impede uma ativação acidental de motores durante a configuração
+						"\r\nESTADO ERRADO!");			// Impede uma ativação acidental de motores durante a configuração
 				print(resposta);
 			}
 			break;										// Finaliza a execução do comando EN
 
 		case CMD_HW:									// Execução do comando HW (período de amostragem)
 			snprintf(resposta, MAX_OUT,					// Prepara a mensagem de confirmação do parâmetro recebido
-					"Define o periodo de amostragem como %dms", in.data[1]);
+					"\r\nDefine o periodo de amostragem como %dms", in.data[1]);
 			print(resposta);							// Envia o feedback visual para o utilizador pela UART
 			int hw[]={1,-1,-1,-1};						// Define que este comando só é permitido no Estado 1 (Configuração)
 			if(!check_state(hw)){						// Verifica se o sistema está no estado de Configuração
@@ -1027,59 +1031,60 @@ void execute(Tokens in){ //Função execute
 					__HAL_TIM_SET_COUNTER(&htim6, 0);
 				}else{
 					snprintf(resposta, MAX_OUT,			// Erro se o valor ultrapassar o limite definido por segurança
-							"\nERRO DE VALOR!");
+							"\r\nERRO DE VALOR!");
 					print(resposta);
 				}
 			}else{
 				snprintf(resposta, MAX_OUT,				// Bloqueia a alteração do período se o motor já estiver em Manual ou Automático
-						"\nESTADO ERRADO!");
+						"\r\nESTADO ERRADO!");
 				print(resposta);
 			}
 			break;										// Finaliza a execução do comando HW
 
 		case CMD_RT:									// Execução do comando RT (tipo de leitura)
 			snprintf(resposta, MAX_OUT,					// Prepara a string de resposta com o modo de leitura pretendido
-					"Define o modo de leitura como %d", in.data[1]);
+					"\r\nDefine o modo de leitura como %d", in.data[1]);
 			print(resposta);							// Envia confirmação para o terminal
 			int rt[]={1,-1,-1,-1};						// Define que este comando só é permitido no Estado 1 (Configuração)
 			if(!check_state(rt)){						// Verifica se o sistema está no estado de Configuração
 				if(in.data[1]<=2){						// Valida o modo: 0 (Posição), 1 (Velocidade) ou 2 (Ambos)
-					//
+					RT=in.data[1];
 				}else{
 					snprintf(resposta, MAX_OUT,			// Erro se o modo de leitura for inexistente (>2)
-							"\nERRO DE VALOR!");
+							"\r\nERRO DE VALOR!");
 					print(resposta);
 				}
 			}else{
 				snprintf(resposta, MAX_OUT,				// Impede a mudança de tipo de leitura fora do modo de configuração
-						"\nESTADO ERRADO!");
+						"\r\nESTADO ERRADO!");
 				print(resposta);
 			}
 			break;										// Finaliza a execução do comando RT
 
 		case CMD_R:										// Execução do comando R (Leitura do ADC)
 			snprintf(resposta, MAX_OUT,					// Prepara a string confirmando os parâmetros de leitura recebidos
-					"Define a leitura como %d e %d", in.data[1], in.data[2]);
+					"\r\nDefine a leitura como %d e %d", in.data[1], in.data[2]);
 			print(resposta);							// Envia o feedback para o terminal série
 			int r[]={2,-1,-1,-1};						// Define que a leitura manual só é permitida no Estado 2 (Manual)
 			if(!check_state(r)){						// Valida se o sistema se encontra no modo Manual
 				if(in.data[1]<=2){						// Verifica se o canal/tipo de leitura solicitado é válido (0, 1 ou 2)
-					//
+					R=in.data[1];
+					laps=in.data[2];
 				}else{
 					snprintf(resposta, MAX_OUT,			// Mensagem de erro caso o parâmetro de canal seja inválido
-							"\nERRO DE VALOR!");
+							"\r\nERRO DE VALOR!");
 					print(resposta);
 				}
 			}else{
 				snprintf(resposta, MAX_OUT,				// Bloqueia a leitura se o sistema estiver em Reset, Config ou Auto
-						"\nESTADO ERRADO!");
+						"\r\nESTADO ERRADO!");
 				print(resposta);
 			}
 			break;										// Finaliza a execução do comando R
 
 		case CMD_PWM:									//Execução do comando PWM(Controlo da atuação)
 			snprintf(resposta, MAX_OUT,					// Mostra o valor do Duty Cycle (%) e o sentido (+ ou -) no terminal
-					"Define o PWM como %d%% com o direcao %c", in.data[2],(in.data[1])?'+':'-');
+					"\r\nDefine o PWM como %d%% com o direcao %c", in.data[2],(in.data[1])?'+':'-');
 			print(resposta);
 			int pwm[]={1,2,-1,-1};						// Define que o ajuste do PWM só é válido nos estados 1 (Config) e 2 (Manual)
 			if(!check_state(pwm)){						// Verifica se estamos num dos dois estados definidos acima
@@ -1105,19 +1110,19 @@ void execute(Tokens in){ //Função execute
 					}
 				}else{
 					snprintf(resposta, MAX_OUT,			// Erro se o utilizador tentar definir mais de 100% de PWM
-							"\nERRO DE VALOR!");
+							"\r\nERRO DE VALOR!");
 					print(resposta);
 				}
 			}else{
 				snprintf(resposta, MAX_OUT,				// Impede o controlo manual do PWM se o sistema estiver em Modo Automático (Estado 3)
-						"\nESTADO ERRADO!");
+						"\r\nESTADO ERRADO!");
 				print(resposta);
 			}
 			break;										// Finaliza a execução do comando PWM
 
 		case CMD_RESPOS:								//Execução do comando RESPOS(Reset da posição 0 do disco)
 			snprintf(resposta, MAX_OUT,					// Prepara a mensagem de confirmação para o utilizador
-					"Reinicia a posicao");
+					"\r\nReinicia a posicao");
 			print(resposta);							// Envia o feedback para o terminal série
 			int respos[]={1,2,-1,-1};					// Define que o reset da posição é permitido em Config (1) ou Manual (2)
 			if(!check_state(respos)){					// Verifica se o sistema está num dos estados autorizados
@@ -1125,7 +1130,7 @@ void execute(Tokens in){ //Função execute
 				inc_vel=0;
 			}else{
 				snprintf(resposta, MAX_OUT,				// Erro se o utilizador tentar dar reset durante o modo Automático
-						"\nESTADO ERRADO!");
+						"\r\nESTADO ERRADO!");
 				print(resposta);
 			}
 			break;										// Finaliza a execução do comando RESPOS
@@ -1139,7 +1144,7 @@ void execute(Tokens in){ //Função execute
 			uint32_t decP = numP % 10;					// Obtém a parte decimal (ex: 34 % 10 = 4)
 
 			snprintf(resposta, MAX_OUT,					// Formata a resposta para mostrar o índice do ganho e o valor original com ponto (ex: 3.4)
-					"Define o PID como %d e posicaoo %d.%d", in.data[1], uniP, decP);
+					"\r\nDefine o PID como %d e posicaoo %d.%d", in.data[1], uniP, decP);
 			print(resposta);							//Escrita da resposta
 
 			int pid[]={1,-1,-1,-1};						// A alteração de ganhos só é permitida no Estado 1 (Configuração)
@@ -1148,47 +1153,67 @@ void execute(Tokens in){ //Função execute
 					//EN = in.data[1];
 				}else{
 					snprintf(resposta, MAX_OUT,			// Erro se o índice for maior que o número de parâmetros disponíveis
-							"\nERRO DE VALOR!");
+							"\r\nERRO DE VALOR!");
 					print(resposta);
 				}
 			}else{
 				snprintf(resposta, MAX_OUT,				// Impede a configuração se o sistema estiver em Manual ou Automático
-						"\nESTADO ERRADO!");
+						"\r\nESTADO ERRADO!");
 				print(resposta);
 			}
 			break;										// Finaliza a execução do comando PID
 
 		default:
-			print("ERRO INTERNO!");						//Se não foi selecionado nenhum dos comandos
+			print("\r\nERRO INTERNO!");						//Se não foi selecionado nenhum dos comandos
 			break;
 		}
 		break;
 
 	// Tratamento dos Erros da Análise Léxica/Sintática
 	case ERR:											//Erro genérico
-		print("ERRO!");
+		print("\r\nERRO!");
 		break;
 	case ERR_PAR:										//Erro de parâmetros
-		print("ERRO DE PARAMETROS!");
+		print("\r\nERRO DE PARAMETROS!");
 		break;
 	case ERR_CMD:										//Erro de comando
-		print("COMANDO NAO RECONHECIDO!");
+		print("\r\nCOMANDO NAO RECONHECIDO!");
 		break;
 	case ERR_OVR:										//Erro de overflow
-		print("OVERFLOW DE PARAMETROS!");
+		print("\r\nOVERFLOW DE PARAMETROS!");
 		break;
 //	case ERR_STATE:										//Erro de estados
 //		print("ERRO DE ESTADOS!");
 //		break;
 	default:											//Erro por defeito
-		print("ERRO INTERNO!");
+		print("\rERRO INTERNO!");
 		break;
 	}
 
 }
+void read(int l){
+	float PosRad = (inc_pos*(2.0*M_PI))/960.0;
+	float PosGra = (inc_pos*360.0)/960.0;
+
+	float pulse = (float)inc_vel/(__HAL_TIM_GET_AUTORELOAD(&htim6)/1000.0);
+	float VelRad = (pulse*(2.0*M_PI))/960.0;
+	float VelGra = (pulse*60.0)/960.0;
+	inc_vel=0;
+	if(RT!=1){
+		snprintf(resposta, MAX_OUT,
+					"\r\nPos: %0.3f rad | %0.3f deg %c %d voltas - [%d]\r\n", PosRad, PosGra, dir?'+':'-', vol, l);
+		print(resposta);
+	}
+	if(RT!=0)
+		snprintf(resposta, MAX_OUT,
+				"\r\nVel: %0.3f rad/s | %0.3f rpm - [%d]\r\n", VelRad, VelGra, l);
+		print(resposta);
+}
 //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+int l = 0;
 int main_loop(void){
+	char resposta[MAX_OUT] = {};						//Resposta ao utilizador
 	if(data_ready == 1){ 								//Verifica se a flag de receção foi ativada
 		upperCase(input);								//Se foi, garante que todos os comandos recebidos ficam apenas em maiúsculas (por causa do Case Sensitivity)
 		// 1. parse(): Divide a string em tokens e valida a sintaxe (Análise Léxica/Sintática)
@@ -1207,6 +1232,9 @@ int main_loop(void){
 		return 1;
 	}
 	if(data_ready == 2){
+		data_ready = 0;
+		snprintf(resposta,MAX_OUT, "%c", rx_buff[0]);
+		print(resposta);
 		if(start_scan(rx_buff) != HAL_OK){				// Tenta reativar o modo de receção
 		 __HAL_UART_CLEAR_OREFLAG(&huart3);				//Limpa o erro de Overrun para desbloquear o periférico
 		 start_scan(rx_buff);								// Segunda tentativa de arranque após limpeza do erro
@@ -1214,22 +1242,30 @@ int main_loop(void){
 	}
 	if (ov){											// Verifica se a flag de overflow está ativa
 		ov = 0;											// Reset da flag (acknowledge)
-		char resposta[MAX_OUT] = {};						//Resposta ao utilizador
 	  	HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_0);			// Indicação visual que o código não "encravou" e o loop principal continua a correr
-		float PosRad = (inc_pos*(2.0*M_PI))/960.0;
-		float PosGra = (inc_pos*360.0)/960.0;
-
-		float pulse = (float)inc_vel/(__HAL_TIM_GET_AUTORELOAD(&htim6)/1000.0);
-		float VelRad = (pulse*(2.0*M_PI))/960.0;
-		float VelGra = (pulse*60.0)/960.0;
-		inc_vel=0;
-		snprintf(resposta, MAX_OUT,					// Formata a resposta para mostrar o índice do ganho e o valor original com ponto (ex: 3.4)
-				"\nPos: %0.3f rad | %0.3f deg + %d voltas\nVel: %0.3f rad/s | %0.3f rpm\n", PosRad, PosGra, vol, VelRad, VelGra);
-		print(resposta);
+		switch(R){
+		case 0:
+			break;
+		case 1:
+			read(l);
+			break;
+		case 2:
+			if(l++<laps){
+				read(l);
+			}else{
+				R=0;
+				l=0;
+			}
+			break;
+		default:
+			l=0;
+			R=0;
+			break;
+		}
 	}
 	if(lim){
 		lim=0;
-		print("Limite de voltas atingido");
+		print("\r\nLimite de voltas atingido");
 	}
 	return 0;
 }
@@ -1239,37 +1275,12 @@ void state_machine(){
 	switch(CS){			//Switch Case para todos os casos
 	case 0:				//Estado 0: Reset
 		print("\r\n\r\nRESET- - - - - - - - - - -");
-		/*
-		Desativa os pinos de enable, de definição de sentido de rotação e de sinal de PWM;
-		Modo de limpeza das configurações iniciais do utilizador (período de amostragem – 10 ms; tipo de leitura - leitura de posição; reset de posição, PWM - duty cycle 0%, valores dos parâmetros PID – todos a zero);
-		Deve ser desativado qualquer periférico em atuação;
-		Transição de estado: o estado 0 deve ser transitório, passando para o estado 1 (modo de configuração) após o reset das variáveis ser concluído.
-		*/
-		//EN = 0;		//Desativa o motor
 		enable(0);
 		CS = 1;		//Por defeito, passamos automaticamente do estado 0 para o estado 1
 		break;
 	case 1:				//Estado 1: Configuração
 		print("\r\n\r\nCONFIG- - - - - - - - - - -");
 		print("\r\n[CONFIG]>");
-		/*
-		Este modo serve para o utilizador configurar diferentes variáveis necessárias para o controlo:
-			Configuração do período de amostragem (utilizador);
-			Configuração do tipo de leitura a ser realizada (utilizador);
-			Configuração do valor inicial do duty-cycle do sinal de PWM (utilizador);
-			Configuração da posição zero do disco - contador de posição inicializado (utilizador);
-			Configuração da posição desejada do disco e dos parâmetros do controlador em malha fechada (utilizador);
-			Configuração dos periféricos necessários (microcontrolador).
-		Subentende-se que sempre que este estado é iniciado, deve-se limpar os somatórios de erros existentes no controlador PID;
-		Subentende-se que ao entrar neste modo de funcionamento, a variável de Enable do motor (EN) deve tomar o valor de 0, e o microcontrolador deve inicializar os restantes periféricos (PWM, GPIO, …);
-		Transição de estado:
-			O estado 1 (Modo de configuração) pode ser selecionado a partir de qualquer um dos outros estados;
-			A partir do estado 1 (Modo de configuração) é possível selecionar qualquer outro estado da máquina de estados.
-		*/
-//		if(last_CS != 1){
-//			EN = 0;
-//		}
-		//EN = 0;			//Desativa o motor
 		enable(0);
 		while (CS==1){		// Executa o loop de polling de comandos pela UART enquanto estiver neste estado
 			if(main_loop()){
@@ -1280,22 +1291,6 @@ void state_machine(){
 	case 2:				//Estado 2: Modo Manual
 		print("\r\n\r\nMANUAL- - - - - - - - - - -");
 		print("\r\n[MANUAL]>");
-		/*
-		Este modo serve para leitura de posição e velocidade angular a partir dos valores do encoder (funções a definir no objetivo 2) e para manipulação contínua e direta do sinal de PWM (funções a definir no objetivo 3);
-		Neste modo é possível:
-			Solicitar pedidos de amostras (utilizador);
-			Enviar comandos de PWM, seja por comando ou usando o teclado (utilizador);
-			Alterar a posição 0 do motor - contador de posição inicializado (utilizador);
-			Realizar o Enable do motor (utilizador);
-		Relativamente ao comando do motor via PWM, apenas passa a ser atuado após a ativação do comando Enable do motor (EN=1). Um para cada sentido de rotação (para a ponte completa do BTS7960).
-		A desativação do Enable do motor ou o pedido de paragem de leituras não deve fazer o programa sair do estado 2 (Modo de leitura/comando manual);
-		Transição de estado:
-			O estado 2 (Modo de leitura/comando manual) é ativado pelo acionamento do CS=2, apenas a partir do estado 1 (Modo de configuração);
-			O estado 2 (Modo de leitura/comando manual) deve permanecer ativo até o estado 0 (modo de Reset) ou o estado 1 (Modo de configuração) ser selecionado. Não é possível passar para o estado 3 (modo automático)
-		*/
-//		if(last_CS != 2){
-//
-//		}
 		while (CS==2){		// Permite o controlo direto e a leitura de sensores sem malha fechada
 			if(main_loop()){
 			print("\r\n[MANUAL]>");
@@ -1305,23 +1300,6 @@ void state_machine(){
 	case 3:				//Estado 3: Modo Automático
 		print("\r\n\r\nAUTO- - - - - - - - - - -");
 		print("\r\n[AUTO]>");
-		/*
-		Este modo visa o teste do controlo do disco usando o controlo PID implementado. O programa a realizar para este estado será definido no objetivo 6;
-		Após a ativação do estado 3 (Modo automático), o sistema deve ligar o Enable do motor (EN=1) e arrancar o teste em malha fechada;
-		Este modo, depois de ativo, deverá permanecer em funcionamento independentemente de qualquer perturbação externa causada à carga mecânica;
-		Caso o utilizador desative o Enable do motor (EN = 0), o motor deve parar e o sistema volta ao estado 1 (modo de configuração).
-		Ao sair deste modo, o sinal de Enable do motor deve ser desativado;
-		Transição de estado:
-			O estado 3 (Modo automático) é ativado pelo acionamento do CS=3, a partir do estado 1 (Modo de configuração).
-			O estado 3 (Modo automático) deve permanecer ativo até ao utilizador voltar a selecionar o estado 1 (Modo de configuração) ou o estado 0 (Modo de Reset). Se realizar o disable (EN=0) do motor deve passar para o estado 1 (Modo de configuração)
-		*/
-//		if(last_CS != 3){
-//			EN = 1;
-//		}
-//		if(EN != 0){
-//			CS=1;
-//		}
-		//EN=1;		//Ativa o motor
 		enable(1);
 		while (CS==3){ //Enquanto ficarmos neste estado
 			if(main_loop()){
@@ -1487,42 +1465,79 @@ volatile int comp = 0;
 void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)	//Callback de Evento de Receção UART: Executado automaticamente pelo hardware
 {
 char resposta[MAX_CHAR];
+int arr = __HAL_TIM_GET_AUTORELOAD(&htim3);
     if (huart->Instance == USART3){		//Verifica se a interrupção veio da USART3 (ligada ao ST-Link/Terminal do PC)
         //input[Size] = '\0';				//Coloca o terminador nulo ('\0') exatamente na posição após o último caractere recebido
     	data_ready = 2;
-    	int inc = (5*__HAL_TIM_GET_AUTORELOAD(&htim3))/100;
+    	int inc = (5*(arr+1))/100;
         if(rx_buff[0]=='\\'){
         	if(dir){
         		comp = __HAL_TIM_GET_COMPARE(&htim3, TIM_CHANNEL_1);
         		comp -= inc;
-        		__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, comp);
+        		if(comp<0){
+        			__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 0);
+        			comp=-comp;
+        			__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, comp);
+        			dir=0;
+        		}else{
+        			__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, comp);
+        		}
         	}else{
         		comp = __HAL_TIM_GET_COMPARE(&htim3, TIM_CHANNEL_2);
-        		comp -= inc;
-        		__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, comp);
+        		comp += inc;
+        		if(comp>arr){
+        			__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, arr);
+        			comp=arr;
+        		}else{
+        			__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, comp);
+        		}
         	}
         	snprintf(resposta, MAX_OUT,					// Formata a resposta para mostrar o índice do ganho e o valor original com ponto (ex: 3.4)
-        					"\nPWM: %d", (comp*100/__HAL_TIM_GET_AUTORELOAD(&htim3))+1);
+        					"\r\nPWM: %c%d > ", dir?'+':'-',((comp+1)*100/(arr+1)));
         	print(resposta);
         }else if(rx_buff[0]=='/'){
         	if(dir){
         		comp = __HAL_TIM_GET_COMPARE(&htim3, TIM_CHANNEL_1);
         		comp += inc;
-        		__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, comp);
+        		if(comp>arr){
+        		 	__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, arr);
+        		 	comp=arr;
+        		}else{
+        		    __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, comp);
+        		}
         	}else{
         		comp = __HAL_TIM_GET_COMPARE(&htim3, TIM_CHANNEL_2);
-        		comp += inc;
-        		__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, comp);
+        		comp -= inc;
+        		if(comp<0){
+        		    __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, 0);
+        		    comp=-comp;
+        		    __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, comp);
+        		    dir=1;
+        		}else{
+        		    __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, comp);
+        		}
         	}
         	snprintf(resposta, MAX_OUT,					// Formata a resposta para mostrar o índice do ganho e o valor original com ponto (ex: 3.4)
-        					"\nPWM: %d", (comp*100/__HAL_TIM_GET_AUTORELOAD(&htim3))+1);
+        					"\r\nPWM: %c%d > ", dir?'+':'-', ((comp+1)*100/(arr+1)));
         	print(resposta);
         }else{
-        	strcat(input, rx_buff);
-        	if(rx_buff[0]=='\n'){
-        		data_ready = 1; 				//Ativa a flag de sinalização. O loop principal (while(1)) verá este '1' e saberá que pode começar a processar o comando.
+        	// Append char to input buffer if there is space (leave 1 byte for \0)
+        	int current_len = strlen(input);
+        	if (current_len < (MAX_CHAR - 1)) {
+        	     input[current_len] = rx_buff[0];
+        	     input[current_len + 1] = '\0';
         	}
+            // Check for end of line (Enter key)
+            if (rx_buff[0] == '\r' || rx_buff[0] == '\n') {
+                 data_ready = 1;
+            }
         }
+//        }else{
+//        	strcat(input, rx_buff);
+//        	if(rx_buff[0]=='\n'){
+//        		data_ready = 1; 				//Ativa a flag de sinalização. O loop principal (while(1)) verá este '1' e saberá que pode começar a processar o comando.
+//        	}
+//        }
     }
 }
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim){ //Callback do Período do Timer: Executado quando o contador do Timer atinge o valor de Auto-Reload (ARR)
@@ -1555,9 +1570,9 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
 			}
 			//lim=1;
 		}
-		if(abs(vol) > 10){
+		if(abs(vol) > VOL){
 			enable(0);
-			print("limite de voltas");
+			lim = 1;
 			vol = 0;
 		}
 	}
