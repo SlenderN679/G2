@@ -532,7 +532,7 @@ Tokens identify(char *in[MAX_STRING], int count){								//Função de análise 
 
 	}else if (strcmp(in[0], "R") == 0){											////Verificação se é o comando R (Leitura do ADC)
 		out.data[0] = CMD_R;													//Ativa o comando R
-		if(count==3){															// Verifica se o utilizador escreveu exatamente 2 parâmetros (Total de 3 palavras)
+		if(count==3 || count==2){												// Verifica se o utilizador escreveu exatamente 2 parâmetros (Total de 3 palavras)
 			char *digitStr = in[1];												// Apontador para a string do primeiro parâmetro (Canal do ADC)
 			char *unitStr = in[2];												// Apontador para a string do segundo parâmetro (Número de amostras ou valor)
 
@@ -988,23 +988,7 @@ void execute(Tokens in){ //Função execute
 			int en[]={2,3,-1,-1};						// Define a lista de estados permitidos para este comando (Manual e Automático)
 			if(!check_state(en)){						// Verifica se o sistema está num estado que permite ligar/desligar motores
 				if(in.data[1]<=1){						// Valida se o parâmetro é binário (0: OFF, 1: ON)
-					//EN = in.data[1];					// Atualiza a variável global de ativação (Enable)
-//					if(EN){								// Se o comando for para ativar o motor (EN = 1)
-//											// Inicia a geração de sinais PWM nos canais do Timer 3 para controlar a Ponte-H
-//											HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
-//											HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_2);
-//											HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_3);
-//											HAL_TIM_Base_Start_IT(&htim6);		//início do timer para o PWM
-//										}else{								// Se o comando for para desativar o motor (EN = 0)
-//											// Interrompe imediatamente os sinais PWM para parar a alimentação dos motores
-//											HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_1);
-//											HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_2);
-//											HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_3);
-//											HAL_TIM_Base_Stop_IT(&htim6);		//início do timer para o PWM
-//										}
 					enable(in.data[1]);
-					//HAL_GPIO_WritePin(GPIOB, GPIO_PIN_MOTOR, (EN==1) ? GPIO_PIN_SET : GPIO_PIN_RESET);
-
 					// Formatação da mensagem final indicando o novo estado real dos motores
 					snprintf(resposta, MAX_OUT, "\r\nMotores %s", (EN==1) ? "ATIVADOS" : "DESATIVADOS");
 					print(resposta);					// Envia o feedback visual para o terminal
@@ -1061,10 +1045,17 @@ void execute(Tokens in){ //Função execute
 			}
 			break;										// Finaliza a execução do comando RT
 
-		case CMD_R:										// Execução do comando R (Leitura do ADC)
-			snprintf(resposta, MAX_OUT,					// Prepara a string confirmando os parâmetros de leitura recebidos
-					"\r\nDefine a leitura como %d e %d", in.data[1], in.data[2]);
-			print(resposta);							// Envia o feedback para o terminal série
+		case CMD_R:										// Execução do comando R
+			if(in.data[1]==2){
+				snprintf(resposta, MAX_OUT,					// Prepara a string confirmando os parâmetros de leitura recebidos
+						"\r\nDefine a leitura como %d com %d leituras", in.data[1], in.data[2]);
+				print(resposta);							// Envia o feedback para o terminal série
+			}else{
+				snprintf(resposta, MAX_OUT,					// Prepara a string confirmando os parâmetros de leitura recebidos
+						"\r\nDefine a leitura como %d", in.data[1]);
+				print(resposta);							// Envia o feedback para o terminal série
+			}
+
 			int r[]={2,-1,-1,-1};						// Define que a leitura manual só é permitida no Estado 2 (Manual)
 			if(!check_state(r)){						// Valida se o sistema se encontra no modo Manual
 				if(in.data[1]<=2){						// Verifica se o canal/tipo de leitura solicitado é válido (0, 1 ou 2)
@@ -1272,46 +1263,57 @@ int main_loop(void){
 //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 void state_machine(){
-	switch(CS){			//Switch Case para todos os casos
-	case 0:				//Estado 0: Reset
-		print("\r\n\r\nRESET- - - - - - - - - - -");
-		enable(0);
-		CS = 1;		//Por defeito, passamos automaticamente do estado 0 para o estado 1
+	switch(CS){												//Switch Case para todos os casos
+	case 0:													//Estado 0: Reset
+		print("\r\n\r\nRESET- - - - - - - - - - -");		//confirmação do estado
+		//EN
+		enable(0);											//desativação dos pinos de enable
+		//HW
+		__HAL_TIM_SET_AUTORELOAD(&htim6, 10-1);				//período de 10ms
+		__HAL_TIM_SET_COUNTER(&htim6, 0);					//reset do contador
+		//RT
+		RT=1;												//leitura de posição
+		//PWM
+		__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, 0);    //canal de direção -
+		__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 0); 	//canal de direção +
+		dir=1;												//flag de direção
+		//CS
+		CS = 1;												//Por defeito, passamos automaticamente do estado 0 para o estado 1
 		break;
-	case 1:				//Estado 1: Configuração
-		print("\r\n\r\nCONFIG- - - - - - - - - - -");
-		print("\r\n[CONFIG]>");
-		enable(0);
-		while (CS==1){		// Executa o loop de polling de comandos pela UART enquanto estiver neste estado
+	case 1:													//Estado 1: Configuração
+		print("\r\n\r\nCONFIG- - - - - - - - - - -");		//confirmação do estado
+		print("\r\n[CONFIG]>");								// Prompt visual para o utilizador
+		enable(0);											//desativação dos pinos de enable
+		while (CS==1){
 			if(main_loop()){
-			print("\r\n[CONFIG]>");			// Prompt visual para o utilizador
+			print("\r\n[CONFIG]>");							// Prompt visual para o utilizador
 			}
 		}
 		break;
-	case 2:				//Estado 2: Modo Manual
-		print("\r\n\r\nMANUAL- - - - - - - - - - -");
-		print("\r\n[MANUAL]>");
-		while (CS==2){		// Permite o controlo direto e a leitura de sensores sem malha fechada
+	case 2:													//Estado 2: Modo Manual
+		print("\r\n\r\nMANUAL- - - - - - - - - - -");		//confirmação do estado
+		print("\r\n[MANUAL]>");								// Prompt visual para o utilizador
+		while (CS==2){										// Permite o controlo direto e a leitura de sensores em malha aberta
 			if(main_loop()){
-			print("\r\n[MANUAL]>");
+			print("\r\n[MANUAL]>");							// Prompt visual para o utilizador
 			}
 		}
 		break;
-	case 3:				//Estado 3: Modo Automático
-		print("\r\n\r\nAUTO- - - - - - - - - - -");
-		print("\r\n[AUTO]>");
-		enable(1);
-		while (CS==3){ //Enquanto ficarmos neste estado
+	case 3:													//Estado 3: Modo Automático
+		print("\r\n\r\nAUTO- - - - - - - - - - -");			//confirmação do estado
+		print("\r\n[AUTO]>");								// Prompt visual para o utilizador
+		enable(1);											//ativação dos pinos de enable
+		while (CS==3){ 										//Enquanto ficarmos neste estado
 			if(main_loop()){
-			print("\r\n[AUTO]>");
+			print("\r\n[AUTO]>");							// Prompt visual para o utilizador
 			}
-			// Se o motor for desativado pelo comando enable (EN=0), regressa ao modo de configuração (1) por segurança
+			// Se o motor for desativado pelo comando enable (EN=0), regressa ao modo de configuração (1)
 			if(!EN){
 				CS=1;
 			}
 		}
 		break;
-	default:			//Por defeito, começa-se sempre no estado 0
+	default:												//Por defeito, começa-se sempre no estado 0
 		CS = 0;
 		break;
 	}
@@ -1521,13 +1523,11 @@ int arr = __HAL_TIM_GET_AUTORELOAD(&htim3);
         					"\r\nPWM: %c%d > ", dir?'+':'-', ((comp+1)*100/(arr+1)));
         	print(resposta);
         }else{
-        	// Append char to input buffer if there is space (leave 1 byte for \0)
         	int current_len = strlen(input);
         	if (current_len < (MAX_CHAR - 1)) {
         	     input[current_len] = rx_buff[0];
         	     input[current_len + 1] = '\0';
         	}
-            // Check for end of line (Enter key)
             if (rx_buff[0] == '\r' || rx_buff[0] == '\n') {
                  data_ready = 1;
             }
