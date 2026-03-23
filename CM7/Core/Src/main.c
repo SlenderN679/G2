@@ -18,7 +18,6 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
-#include "adc.h"
 #include "tim.h"
 #include "usart.h"
 #include "gpio.h"
@@ -62,12 +61,9 @@ void SystemClock_Config(void);
 #define MAX_DELIM 10		//Definição do limite máximo dos caracteres delimitadores
 #define MAX_OUT 512			//Definição do tamanho máximo da resposta ao utilizador
 #define HAL_MAX_DELAY 1000	//Definição do delay de leitura da usart
-#define MEM 65536			//Limite dos caracteres hexadecimais (0 até 16^4)
 
 #define TIM3_ARR  (64000-1)	// Valor de início do Auto-reload register
 #define TIM3_CCR  (32000-1) // Valor de início do Capture-Compare Register
-
-#define MAX_ADC 10			//Timeout de 10ms
 
 #define VOL 10				//Nº de voltas (máximo valor = 10)
 //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -76,12 +72,10 @@ void SystemClock_Config(void);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-uint8_t memory[MEM]={1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20}; //Buffer que atua como memória virtual para os comandos MR e MW
 const char delim[MAX_DELIM] = " ";										  //Declaração e inicialização dos caracteres delimitadores
 char input[MAX_CHAR] = "";												  //Declaração e inicialização do buffer de entrada da uart
 volatile char rx_buff[MAX_CHAR];										  //Buffer de receção de caracteres
 volatile uint8_t data_ready = 0;										  //Declaração e inicialização da flag de receção da uart
-int pins[16];															  //Declaração e inicialização do vetor de pinos ativos pelos comandos
 volatile uint8_t ov;													  //Variável para a flag de interrupção genérica (overflow)
 volatile int inc_pos=0;													  //Variável para incremento da posição
 volatile int inc_vel=0;													  //Variável para incremento da velocidade
@@ -96,15 +90,7 @@ int RT=2;																  //Variável de definição de leitura (neste caso def
 int laps=0;																  //Nº de voltas
 char resposta[MAX_OUT] = {};											  //Resposta ao utilizador
 
-//uint8_t Per = 499;
-
 typedef enum{                           // Enumeração dos tipos de parâmetros esperados na análise sintática
-    /*HEX = 0,                          // Parâmetro hexadecimal
-    DEC,                                // Parâmetro hexadecimal, apresentado como decimal
-    PORT,                               // Parâmetro de 'A' a 'Z'
-    PIN,                                // Parâmetro hexadecimal, apresentado como string de pinos ativos, obtidos como binário
-    VALUE,                              // Parâmetro hexadecimal, apresentado como string de valores binários
-    DUTY,*/                             // Parâmetro hexadecimal, apresentado como decimal (para o duty-cycle)
     INT = 0,                            // Parâmetro para números inteiros (ex: os endereços de memória para MR/MW)
     DEC,                                // Parâmetro para números decimais (ex: o duty-cycle para o PWM)
     PIN,                                // Parâmetro hexadecimal, representando o mapa dos pinos (ex: o mapa de pinos para PI/PO/RD/WD)
@@ -126,15 +112,7 @@ typedef enum{							//Enumeração dos tipos de erros
 }Error;
 
 typedef enum{							//Enumeração dos tipos de comandos a usar
-	CMD_MR = 0,							//Comando Memory Read
-	CMD_MW,								//Comando Memory Write
-	CMD_PI,								//Comando Make Pins Input
-	CMD_PO,								//Comando Make Pins Output
-	CMD_RD,								//Comando Read Digital Input
-	CMD_WD,								//Comando Write Digital Output
-	CMD_PWMS,							//Comando Pulse Width Modulation
-	CMD_RA,								//Comando Analog Read
-	CMD_HELP,							//Comando Help
+	CMD_HELP = 0,						//Comando Help
 	CMD_CS,								//Comando Control System
 	CMD_EN,								//Comando Enable dos Motores
 	CMD_HW,								//Comando do período de amostragem
@@ -149,74 +127,6 @@ typedef struct {                        // Estrutura gerada pelo analisador léx
     int data[10];                       // Vetor de tokens convertidos em inteiros/dados numéricos
     Error state;                        // Regista se ocorreu algum erro durante o parsing da string
 }Tokens;
-
-typedef struct {                        // Estrutura do mapeamento abstrato de uma porta GPIO
-    GPIO_TypeDef *channel;              // Apontador para a estrutura base da porta (ex: GPIOA, GPIOB)
-    uint16_t pin_mask;                  // Máscara com os pinos físicos que estão efetivamente disponíveis na placa
-}Port;
-
-typedef struct {                        // Estrutura da tabela de pesquisa de portas
-    char id;                            // Identificador em caractere ('A', 'B', etc.)
-    GPIO_TypeDef *channel;              // Apontador para o respetivo periférico GPIO
-    uint16_t mask;                      // Máscara de pinos permitidos/seguros para manipulação
-} PortEntry;
-//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-// Tabela constante de pesquisa. Mapeia a letra da porta introduzida pelo utilizador para o endereço do hardware.
-// Impede que o utilizador tente configurar pinos inexistentes ou reservados pela nossa placa (Nucleo-H755)
-static const PortEntry port_table[] = {
-    {'A', GPIOA, (1<<0 | 1<<3 | 1<<4 | 1<<5 | 1<<6 | 1<<15)},
-    {'B', GPIOB, (1<<0 | 1<<1 | 1<<2 | 1<<3 | 1<<4 | 1<<5 | 1<<6 | 1<<7 | 1<<8 | 1<<9 | 1<<10 | 1<<11 | 1<<12 | 1<<13 | 1<<15)},
-    {'C', GPIOC, (1<<0 | 1<<2 | 1<<3 | 1<<6 | 1<<7 | 1<<8 | 1<<9 | 1<<10 | 1<<11 | 1<<12)},
-    {'D', GPIOD, (1<<0 | 1<<1 | 1<<2 | 1<<3 | 1<<4 | 1<<5 | 1<<6 | 1<<7 | 1<<11 | 1<<12 | 1<<13 | 1<<14 | 1<<15)},
-    {'E', GPIOE, (1<<0 | 1<<2 | 1<<3 | 1<<4 | 1<<5 | 1<<6 | 1<<7 | 1<<8 | 1<<9 | 1<<10 | 1<<11 | 1<<12 | 1<<13 | 1<<14 | 1<<15)},
-    {'F', GPIOF, (1<<7 | 1<<8 | 1<<9)},
-    {'G', GPIOG, (1<<6 | 1<<12 | 1<<14)}
-};
-//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-Port select_port(char port_char) {                              									// Função de pesquisa da porta pelo endereço da mesma (<portAddr>)
-    int i=0;																						//Declaração e inicialização do iterador
-    for (i = 0; i < (sizeof(port_table) / sizeof(PortEntry)); i++) { 								// Percorre a tabela das portas
-        if (port_table[i].id == port_char) {                   										// Se o caractere recebido coincidir com o endereço da porta em questão
-            return (Port){ .channel = port_table[i].channel, .pin_mask = port_table[i].mask }; 		// Retorna a configuração
-        }
-    }
-    return (Port){ .channel = NULL, .pin_mask = 0 };            									// Retorna NULL se a porta não existir (útil para validar erros)
-}
-//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-Error pins_restricted(Port port, int pins){ //Retorna ERR se houver uma tentativa de acesso a bits fora da máscara permitida e ALL_OK caso contrário
-	return ((pins & ~port.pin_mask) != 0 ? ERR : ALL_OK);
-}
-void start_GPIO_CLK(char p){ 						//Função para ativar os clocks das respetivas portas do GPIO
-	switch(p){
-		case 'A':
-			__HAL_RCC_GPIOA_CLK_ENABLE();			//Ativar o clock da porta A
-			break;
-		case 'B':
-			__HAL_RCC_GPIOB_CLK_ENABLE();			//Ativar o clock da porta B
-			break;
-		case 'C':
-			__HAL_RCC_GPIOC_CLK_ENABLE();			//Ativar o clock da porta C
-			break;
-		case 'D':
-			__HAL_RCC_GPIOD_CLK_ENABLE();			//Ativar o clock da porta D
-			break;
-		case 'E':
-			__HAL_RCC_GPIOE_CLK_ENABLE();			//Ativar o clock da porta E
-			break;
-		case 'F':
-			__HAL_RCC_GPIOF_CLK_ENABLE();			//Ativar o clock da porta F
-			break;
-		case 'G':
-			__HAL_RCC_GPIOG_CLK_ENABLE();			//Ativar o clock da porta G
-			break;
-	}
-}
-//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-/*int _write(int file, char *ptr, int len) {
-    HAL_StatusTypeDef status = HAL_UART_Transmit(&huart3, (uint8_t *)ptr, len, HAL_MAX_DELAY);
-    return (status == HAL_OK) ? len : -1;
-}*/
 //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 int print(char string[MAX_OUT]){															//Função de apresentação de uma string no terminal
@@ -339,141 +249,6 @@ Tokens identify(char *in[MAX_STRING], int count){								//Função de análise 
 
 		out.state = ALL_OK;														//Confirmação da validação (tudo bem)
 		return out;																//Retorna o comando escolhido na string de saída
-
-	}else if(strcmp(in[0], "MR") == 0){											////Verificação se é o comando de leitura de memória
-		out.data[0] = CMD_MR;													//Ativa o comando MEMORY READ
-		if(count==3){															//Verificação do número de parâmetros
-			char *addrStr = in[1];												//Declaração e inicialização da string do endereço da memória
-			char *lenStr = in[2];												//Declaração e inicialização da string do nº de bytes
-			if((validate(addrStr, 4, INT, &(out.data[1]), 1))						//Validação do endereço, com 4 dígitos, sendo inteira
-					||(validate(lenStr, 2, INT, &(out.data[2]), 1))){				//Validação do comprimento, com 2 dígitos, sendo inteira
-				out.state = ERR_PAR;											//Se a validação der errado, estamos com erro de parâmetros
-				return out;														//Retorna o erro de parâmetros na string de saída
-			}
-
-			out.state = ALL_OK;													//Confirmação da validação (tudo bem)
-			return out;															//Retorna o comando escolhido na string de saída
-		}
-		out.state = ERR_PAR;													//Se a validação der errado, estamos com erro de parâmetros
-		return out;																//Retorna o erro de parâmetros na string de saída
-
-	}else if(strcmp(in[0], "MW") == 0){											////Verificação se é o comando de escrita na memória
-		out.data[0] = CMD_MW;													//Ativa o comando MEMORY WRITE
-		if(count==4){															//Verificação do número de parâmetros
-			char *addrStr = in[1];												//Declaração e inicialização da string do endereço de memória
-			char *lenStr = in[2];												//Declaração e inicialização da string do nº de bytes
-			char *byteStr = in[3];												//Declaração e inicialização da string do valor do byte
-			if((validate(addrStr, 4, INT, &(out.data[1]), 1))						//Validação do endereço, com 4 dígitos, sendo inteiro
-					||(validate(lenStr, 2, INT, &(out.data[2]), 1))				//Validação do comprimento, com 2 dígitos, sendo inteiro
-						||(validate(byteStr, 2, INT, &(out.data[3]), 1))){     	//Validação do valor, com 2 dígitos, sendo inteiro
-				out.state = ERR_PAR;											//Se a validação der errado, estamos com erro de parâmetros
-				return out;														//Retorna o erro de parâmetros na string de saída
-			}
-
-			out.state = ALL_OK;													//Confirmação da validação (tudo bem)
-			return out;															//Retorna o comando escolhido na string de saída
-		}
-		out.state = ERR_PAR;													//Se a validação der errado, estamos com erro de parâmetros
-		return out;																//Retorna o erro de parâmetros na string de saída
-
-	}else if(strcmp(in[0], "PI") == 0){											////Verificação se é o comando de configuração dos pinos de entrada
-		out.data[0] = CMD_PI;													//Ativa o comando MAKE PINS INPUT
-		if(count==3){															//Verificação do número de parâmetros
-			char *portStr = in[1];												//Declaração e inicialização da string do endereço da porta
-			char *pinStr = in[2];												//Declaração e inicialização da string do mapa de pinos
-			if((validate(portStr, 1, CHAR, &(out.data[1]), 1))						//Validação da porta, com 1 dígito, sendo um caractere (uma letra)
-					||(validate(pinStr, 4, PIN, &(out.data[2]), 1))){ 				//Validação dos pinos, com 4 dígitos, sendo a lista dos pinos
-				out.state = ERR_PAR;											//Se a validação der errado, estamos com erro de parâmetros
-				return out;														//Retorna o erro de parâmetros na string de saída
-			}
-
-			out.state = ALL_OK;													//Confirmação da validação (tudo bem)
-			return out;															//Retorna o comando escolhido na string de saída
-		}
-		out.state = ERR_PAR;													//Se a validação der errado, estamos com erro de parâmetros
-		return out;																//Retorna o erro de parâmetros na string de saída
-
-	}else if(strcmp(in[0], "PO") == 0){											////Verificação se é o comando de configuração dos pinos de saída
-		out.data[0] = CMD_PO;													//Ativa o comando MAKE PINS OUTPUT
-		if(count==3){															//Verificação do número de parâmetros
-			char *portStr = in[1];												//Declaração e inicialização da string do endereço da porta
-			char *pinStr = in[2];												//Declaração e inicialização da string do mapa de pinos
-			if((validate(portStr, 1, CHAR, &(out.data[1]), 1))						//Validação da porta, com 1 dígito, sendo um caractere (uma letra)
-					||(validate(pinStr, 4, PIN, &(out.data[2]), 1))){				//Validação dos pinos, com 4 dígitos, sendo a lista de pinos
-				out.state = ERR_PAR;											//Se a validação der errado, estamos com erro de parâmetros
-				return out;														//Retorna o erro de parâmetros na string de saída
-			}
-
-			out.state = ALL_OK;													//Confirmação da validação (tudo bem)
-			return out;															//Retorna o comando escolhido na string de saída
-		}
-		out.state = ERR_PAR;													//Se a validação der errado, estamos com erro de parâmetros
-		return out;																//Retorna o erro de parâmetros na string de saída
-
-	}else if(strcmp(in[0], "RD") == 0){											////Verificação se é o comando de leitura digital dos pinos
-		out.data[0] = CMD_RD;													//Ativa o comando READ DIGITAL INPUT
-		if(count==3){															//Verificação do número de parâmetros
-			char *portStr = in[1];												//Declaração e inicialização da string do endereço da porta
-			char *pinStr = in[2];												//Declaração e inicialização da string do mapa de pinos
-			if((validate(portStr, 1, CHAR, &(out.data[1]), 1))						//Validação da porta, com 1 dígito, sendo um caractere (uma letra)
-					||(validate(pinStr, 4, PIN, &(out.data[2]), 1))){  			//Validação dos pinos, com 4 dígitos, sendo a lista de pinos
-				out.state = ERR_PAR;											//Se a validação der errado, estamos com erro de parâmetros
-				return out;														//Retorna o erro de parâmetros na string de saída
-			}
-
-			out.state = ALL_OK;													//Confirmação da validação (tudo bem)
-			return out;															//Retorna o comando escolhido na string de saída
-		}
-		out.state = ERR_PAR;													//Se a validação der errado, estamos com erro de parâmetros
-		return out;																//Retorna o erro de parâmetros na string de saída
-
-	}else if(strcmp(in[0], "WD") == 0){											////Verificação se é o comando de escrita digital dos pinos
-		out.data[0] = CMD_WD;													//Ativa o comando WRITE DIGITAL OUTPUT
-		if(count==4){															//Verificação do número de parâmetros
-			char *portStr = in[1];												//Declaração e inicialização da string do endereço da porta
-			char *pinStr = in[2];												//Declaração e inicialização da string do mapa de pinos
-			char *valStr = in[3];												//Declaração e inicialização da string do valor do pino
-			if((validate(portStr, 1, CHAR, &(out.data[1]), 1))						//Validação da porta, com 1 dígito, sendo um caractere (uma letra)
-					||(validate(pinStr, 4, PIN, &(out.data[2]), 1))				//Validação dos pinos, com 4 dígitos, sendo alista de pinos
-						||(validate(valStr, 4, BIN, &(out.data[3]), 1))){			//Validação dos valores, com 4 dígitos, sendo os valores lógicos dos pinos
-				out.state = ERR_PAR;											//Se a validação der errado, estamos com erro de parâmetros
-				return out;														//Retorna o erro de parâmetros na string de saída
-			}
-
-			out.state = ALL_OK;													//Confirmação da validação (tudo bem)
-			return out;															//Retorna o comando escolhido na string de saída
-		}
-		out.state = ERR_PAR;													//Se a validação der errado, estamos com erro de parâmetros
-		return out;																//Retorna o erro de parâmetros na string de saída
-
-	}else if(strcmp(in[0], "PWMS") == 0){										////Verificação se é o comando de PWMS
-		out.data[0] = CMD_PWMS;													//Ativa o comando PULSE WIDTH MODULATION
-		if(count==2){															//Verificação do número de parâmetros
-			char *dutyStr = in[1];												//Declaração e inicialização da string do duty-cycle
-			if(validate(dutyStr, 2,INT, &(out.data[1]), 1)){						//Validação do duty-cycle, com 2 dígitos,em uma variável inteira
-				out.state = ERR_PAR;											//Se a validação der errado, estamos com erro de parâmetros
-				return out;														//Retorna o erro de parâmetros na string de saída
-			}
-			out.state = ALL_OK;													//Confirmação da validação (tudo bem)
-			return out;															//Retorna o comando escolhido na string de saída
-		}
-		out.state = ERR_PAR;													//Se a validação der errado, estamos com erro de parâmetros
-		return out;																//Retorna o erro de parâmetros na string de saída
-
-	}else if(strcmp(in[0], "RA") == 0){											////Verificação se é o comando de leitura analógica do ADC (Analog to Digital Converter)
-		out.data[0] = CMD_RA;													//Ativa o comando ANALOG READ
-		if(count==2){															//Verificação do número de parâmetros
-			char *addrStr = in[1];												//Declaração e inicialização da string do endereço do canal 3 do ADC
-			if(validate(addrStr, 1, INT, &(out.data[1]), 1)){						//Validação do endereço, com 1 dígito, sendo inteiro
-				out.state = ERR_PAR;											//Se a validação der errado, estamos com erro de parâmetros
-				return out;														//Retorna o erro de parâmetros na string de saída
-			}
-			out.state = ALL_OK;													//Confirmação da validação (tudo bem)
-			return out;															//Retorna o comando escolhido na string de saída
-		}
-		out.state = ERR_PAR;													//Se a validação der errado, estamos com erro de parâmetros
-		return out;																//Retorna o erro de parâmetros na string de saída
-	//----------------------------------------------------------------------------------------------------------------------------------------------------------------------
 	}else if (strcmp(in[0], "CS") == 0){										////Verificação se é o comando CS (Control System): Altera o estado da máquina de estados
 		out.data[0] = CMD_CS;													//Ativa o comando CONTROL SYSTEM (CS)
 		if(count==2){															// Espera 1 parâmetro: o número do estado (0, 1, 2 ou 3)
@@ -532,13 +307,13 @@ Tokens identify(char *in[MAX_STRING], int count){								//Função de análise 
 
 	}else if (strcmp(in[0], "R") == 0){											////Verificação se é o comando R (Leitura do ADC)
 		out.data[0] = CMD_R;													//Ativa o comando R
-		if(count==3 || count==2){												// Verifica se o utilizador escreveu exatamente 2 parâmetros (Total de 3 palavras)
+		if((count==3) || (count==2)){											// Verifica se o utilizador escreveu exatamente 2 parâmetros (Total de 3 palavras)
 			char *digitStr = in[1];												// Apontador para a string do primeiro parâmetro (Canal do ADC)
 			char *unitStr = in[2];												// Apontador para a string do segundo parâmetro (Número de amostras ou valor)
 
 			// Valida o primeiro parâmetro como um dígito (DIG) e o segundo como um inteiro sem sinal (UINT)
 			if((validate(digitStr, 1, DIG, &(out.data[1]), 0))
-					||(validate(unitStr, 4, UINT, &(out.data[2]), 0))){
+					||((out.data[1]==2)&&(validate(unitStr, 4, UINT, &(out.data[2]), 0)))){
 				out.state = ERR_PAR;											//Se a validação der errado, estamos com erro de parâmetros
 				return out;														//Retorna o erro de parâmetros na string de saída
 			}
@@ -609,59 +384,6 @@ Tokens identify(char *in[MAX_STRING], int count){								//Função de análise 
 }
 //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-void list(int num, char out[64], Type t, int pin){  //Função para ajudar na lista de pinos
-	int pins[16]={};								// Vetor temporário para guardar os índices dos pinos ativos
-	int data[16]={};								// Vetor para guardar os dados finais a apresentar
-	char temp[64]={};								// String auxiliar temporária para usar com o sprintf
-	int n=0;										//Reset do índice do vetor
-	int i=0;										//Declaração e inicialização do iterador
-	pins[0] = '\0';									//Reset do array de pinos
-
-	// Descodificação da máscara de pinos (num)
-	for (i=0; i<16; i++){							//Ciclo a percorrer todos os pinos da porta GPIO do STM32 (0 a 15)
-		if(num>>i & 0x01){							// Desloca o bit 'i' para a posição 0 e isola-o com a máscara AND 0x01
-			pins[n++]=i;							// Se o bit for 1, o pino 'i' foi selecionado. Guarda o índice e avança 'n'
-		}
-	}
-
-	//Preparação dos dados a mostrar consoante o tipo pedido
-	if(t == BIN){									// Se for o comando WD (Write Digital), queremos os valores a escrever
-		int bin[16] = {0};							// Vetor intermédio para mapear os 16 bits de valor 1 ou 0
-		for (i=0; i<16; i++){						//Ciclo a percorrer os 16 bits do parâmetro 'pin' (<pinValues>)
-			if(pin>>i & 0x01){						// Extrai o bit individual do valor lógico
-				bin[i]=1;							// Regista que o pino 'i' deve receber o estado lógico ALTO (1)
-			}
-		}
-		for (i=0; i<n; i++){						//Ciclo de filtragem, usando apenas os pinos que foram efetivamente selecionados
-			data[i]=bin[pins[i]];					// Guarda no vetor de saída o valor lógico (0 ou 1) correspondente àquele pino
-		}
-	}else{											// Para os comandos PI, PO ou RD, queremos apenas os NÚMEROS dos pinos
-		for (i=0; i<n; i++){						//Ciclo a percorrer o vetor de pinos selecionados
-			data[i]=pins[i];						// O dado a mostrar é o índice físico do pino
-		}
-	}
-	out[0]='\0';									//Reset da string de saída
-
-	if (num>0){										// Se a máscara não estiver a zeros (pelo menos um pino selecionado)
-		sprintf(temp, "%d", data[0]); 				//Formata o primeiro elemento da lista (pino ou valor). Converte o pino para string
-		strcat(out, temp);          				// Adiciona este primeiro elemento à string de saída
-
-		for(i=1;i<n;i++){							//Ciclo que percorre os restantes elementos encontrados
-			if(i!=(n-1)){							// Se não for o último elemento da lista
-				sprintf(temp, ", %d", data[i]); 	// Prepara o separador com vírgula (ex: "1, 2")
-				strcat(out, temp);         			// Concatena na string principal
-			}else{									// Se for o último elemento da lista
-				sprintf(temp, " e %d", data[i]); 	// Coloca a conjunção "e" para fechar a lista (ex: "1, 2 e 5")
-				strcat(out, temp);          		// Concatena na string principal
-			}
-		}
-	}else{											// Se nenhum pino foi selecionado (num == 0)
-		sprintf(temp, "n/a "); 						// Informa que o resultado não é Aplicável (n/a)
-		strcat(out, temp);         					// Concatena na string principal
-	}
-}
-//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 Error check_state(int states[4]){					//Verifica se o estado atual do sistema (CS) consta na lista de estados permitidos para um determinado comando
 	int i=0;										// Inicializa a variável auxiliar para percorrer o array
 	for(i=0;i<4;i++){								// Ciclo para comparar o estado atual com a lista de estados autorizados
@@ -702,6 +424,8 @@ Tokens parse(char in[MAX_CHAR], const char delim[MAX_DELIM]){		//Função de tok
 	 }
 	 return identify(strings, count);								// Passa o vetor resultante para a Análise Sintática (identify)
 }
+//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 void enable(int e){
 	EN=e;
 	if(EN){								// Se o comando for para ativar o motor (EN = 1)
@@ -721,14 +445,11 @@ void enable(int e){
 		HAL_TIM_Base_Stop_IT(&htim6);		//início do timer para o PWM
 		HAL_GPIO_WritePin(GPIOB, ENABLE_Pin,GPIO_PIN_RESET);
 		HAL_GPIO_WritePin(GPIOB, ENABLE2_Pin,GPIO_PIN_RESET);
+		vol = 0;
 	}
 }
 //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-ADC_ChannelConfTypeDef ADC_CH_Cfg = {0}; //Inicialização da configuração do canal do ADC
-//Lista de canais ADC
-uint32_t ADC_Channels[] = {ADC_CHANNEL_0, ADC_CHANNEL_1, ADC_CHANNEL_2, ADC_CHANNEL_3, ADC_CHANNEL_4, ADC_CHANNEL_5, ADC_CHANNEL_6, ADC_CHANNEL_7, ADC_CHANNEL_8, ADC_CHANNEL_9, ADC_CHANNEL_10, ADC_CHANNEL_11, ADC_CHANNEL_12, ADC_CHANNEL_13, ADC_CHANNEL_14, ADC_CHANNEL_15, ADC_CHANNEL_16, ADC_CHANNEL_17, ADC_CHANNEL_18, ADC_CHANNEL_19};
-
 void execute(Tokens in){ //Função execute
 	// Buffers locais para montagem das mensagens de resposta ao utilizador
 	char resposta[MAX_OUT] = {};						//Resposta ao utilizador
@@ -737,227 +458,23 @@ void execute(Tokens in){ //Função execute
 	char out[MAX_OUT]={};								// Buffer auxiliar para concatenação de strings longas (diferente do out referido no código anterior)
 	char temp[64]={};									// String temporária para conversões rápidas
 	int i=0;											//Declaração e inicialização do iterador
-	Port port;											// Estrutura para manipular a porta selecionado
-	GPIO_InitTypeDef GPIO_InitStruct = {0};				// Estrutura HAL para configuração dos pinos
 	switch(in.state){									// Primeiro nível de decisão: Verifica se o comando é válido antes de tentar executar
 	case ALL_OK:
 		switch(in.data[0]){								// Segundo nível de decisão: Identifica qual o comando específico que foi solicitado
 
 		case CMD_HELP:									// Comando '?' - Lista de ajuda
-			print("Comandos disponiveis:\n");
-			print("?                                                                              - Fornece uma lista dos comandos validos.\r\n");
-			print("MR <addr> <length>                                         - Ler <length> bytes a partir de endereco de memoria <addr>h\r\n");
-			print("MW <addr> <length> <byte>                          - Escrever <length> bytes a partir de endereco de memoria <addr>h com o valor <byte>h\r\n");
-			print("PI <portAddr> <pinsMap>                              - Programar os pinos <pinsMap> da porta <portAddr> como entrada\r\n");
-			print("PO <portAddr> <pinsMap>                            - Programar os pinos <pinsMap> da porta <portAddr> como saida\r\n");
-			print("RD <portAddr> <pinsMap>                            - Ler os pinos <pinsMap> da porta <portAddr>\r\n");
-			print("WD <portAddr> <pinsMap> <pinValues> - Escrever nos bits <pinsMap> da porta <portAddr>, os valores <pinValues>\r\n");
-			print("PWM <dutyCycle>                                            - Duty-cycle de <dutyCycle>%\r\n");
-			print("RA <addr>                                                           - Ler o canal <addr> de um ADC pre-determinado");
+			print("Comandos disponiveis:\r\n");
+			print("?                   - Fornece uma lista dos comandos validos.\r\n");
+			print("CS <dig>            - Define o estado: 0-Reset, 1-Config, 2-Manual, 3-Auto\r\n");
+			print("EN <dig>            - Ativa (1) ou Desativa (0) os motores\r\n");
+			print("HW <uint>           - Define periodo de amostragem (1 a 1000 ms)\r\n");
+			print("RT <dig>            - Tipo de leitura: 0-Pos, 1-Vel, 2-Ambos\r\n");
+			print("R <dig> <uint>      - Leitura: 0-Para, 1-Continua, 2-Limitada (n amostras)\r\n");
+			print("PWM <signval>       - Tensão Normalizada (-100 a +100%)\r\n");
+			print("RESPOS              - Reinicializa a posicao zero do disco\r\n");
+			print("PID <dig> <float>   - Configura PID: 0-yr, 1-Kp, 2-Ki, 3-Kd, 4-alpha, 5-Ler\r\n");
+			print("Teclas '/' e '\\'    - Ajuste rapido de PWM (+/- 5 unidades)\r\n");
 			break;
-
-		case CMD_MR:									//Memory Read
-			snprintf(resposta, MAX_OUT,					//Apresentação da resposta ao comando
-					"Ler %d bytes a partir de endereco de memoria %04Xh ", in.data[2], in.data[1]);
-			print(resposta);							//Escrita da resposta
-			sprintf(temp, "\r\nRead: ");
-						strcat(out, temp);
-			for(i=0; i<in.data[2]; i++){				// Ciclo para ler a memória virtual (vetor 'memory')
-														// Proteção contra leitura fora de limites (Memory Wrap-around)
-				sprintf(temp, "%X ", ((in.data[1]+i >= MEM )? memory[i] : memory[in.data[1]+i]));
-				strcat(out, temp);						// Concatena na string principal
-			}
-			print(out);
-			break;
-
-		case CMD_MW:									//Memory Write
-			snprintf(resposta, MAX_OUT,					//Apresentação da resposta ao comando
-					"Escrever %d bytes a partir de endereco de memoria %04Xh com o valor %02Xh ", in.data[2], in.data[1], in.data[3]);
-			print(resposta);							//Escrita da resposta
-			sprintf(temp, "\r\nWritten: ");
-						strcat(out, temp);				// Concatena na string principal
-			// Ciclo para escrever na memória virtual (vetor 'memory')
-			for(i=0; i<in.data[2]; i++){
-				// Escrita na memória virtual com verificação dos limites
-				if((in.data[1]+i)>=MEM){
-					memory[i]=in.data[3];
-				}else{
-					memory[in.data[1]+i]=in.data[3];
-				}
-				//memory[in.data[1]+i]=in.data[3];
-				sprintf(temp, "%X ", ((in.data[1]+i >= MEM )? memory[i] : memory[in.data[1]+i])); 				//Converte o pino para string
-				strcat(out, temp);						// Concatena na string principal
-				}
-			print(out);
-			break;
-
-		case CMD_PI:									//Make Pins Input
-			list(in.data[2], active, PIN, 0);			// Converte a máscara hexadecimal para uma string legível
-			snprintf(resposta, MAX_OUT,					//Apresentação da resposta ao comando
-					"Programar os pinos %s da porta %c como entrada", active, in.data[1]);
-			print(resposta);							//Escrita da resposta
-
-			port = select_port(in.data[1]);				// Obtém o endereço real do hardware (ex: GPIOA)
-			if(port.channel == NULL){					//Se não conseguir, diz que a porta está fora do alcance
-				snprintf(resposta, MAX_OUT,	//Apresentação da resposta ao comando
-						"\r\nPORTA FORA DE ALCANCE");
-				print(resposta);			//Escrita da resposta
-				return;
-			}
-			// Valida se os pinos solicitados não são restritos
-			if(pins_restricted(port,in.data[2])){
-				snprintf(resposta, MAX_OUT,	//Apresentação da resposta ao comando
-						"\r\nPINOS RESTRITOS!");
-				print(resposta);			//Escrita da resposta
-				return;
-			}
-			start_GPIO_CLK(in.data[1]);
-			// Configuração física via HAL
-			GPIO_InitStruct.Pin = in.data[2];			//Máscara de bits
-			GPIO_InitStruct.Mode = GPIO_MODE_INPUT;		//Configurar os pinos para entrada
-			GPIO_InitStruct.Pull = GPIO_PULLDOWN;		//Garante o nível lógico 0 se nada estiver ligado
-			HAL_GPIO_Init(port.channel, &GPIO_InitStruct); // Aplica a configuração do hardware: escreve nos registos do periférico (port.channel) as definições do modo e dos pinos guardados na estrutura GPIO_InitStruct
-			snprintf(resposta, MAX_OUT,						//Apresentação da resposta ao comando
-					"\r\nPinos definidos como entrada.");
-			print(resposta);								//Escrita da resposta
-			break;
-
-		case CMD_PO:									//Make Pins Output
-			list(in.data[2], active, PIN, 0);			// Converte a máscara hexadecimal para uma string legível
-			snprintf(resposta, MAX_OUT,					//Apresentação da resposta ao comando
-					"Programar os pinos %s da porta %c como saida", active, in.data[1]);
-			print(resposta);							//Escrita da resposta
-			port = select_port(in.data[1]);				// Obtém o endereço real do hardware (ex: GPIOA)
-			if(port.channel == NULL){					//Se não conseguir, diz que a porta está fora do alcance
-				snprintf(resposta, MAX_OUT,				//Apresentação da resposta ao comando
-						"\nPORTA FORA DE ALCANCE");
-				print(resposta);						//Escrita da resposta
-				return;
-			}
-			// Valida se os pinos solicitados não são restritos (ex: pinos do depurador ou oscilador)
-				if(pins_restricted(port,in.data[2])){
-					snprintf(resposta, MAX_OUT,			//Apresentação da resposta ao comando
-							"\nPINOS RESTRITOS!");
-					print(resposta);					//Escrita da resposta
-					return;
-			}
-			start_GPIO_CLK(in.data[1]);
-			// Configuração física via HAL
-			GPIO_InitStruct.Pin = in.data[2];			//Máscara de bits (ex: 0x0001 para o pino 0)
-			GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP; //Configurar os pinos para saída
-			HAL_GPIO_Init(port.channel, &GPIO_InitStruct);// Aplica a configuração do hardware: escreve nos registos do periférico (port.channel) as definições do modo e dos pinos guardados na estrutura GPIO_InitStruct
-			snprintf(resposta, MAX_OUT,					//Apresentação da resposta ao comando
-				"\nPinos definidos como saida.");
-			print(resposta);							//Escrita da resposta
-			break;
-
-		case CMD_RD:									//Read Digital Input
-			list(in.data[2], active, PIN, 0);			// Converte a máscara hexadecimal para uma string legível
-			snprintf(resposta, MAX_OUT,					//Apresentação da resposta ao comando
-					"Ler os pinos %s da porta %c\n", active, in.data[1]);
-			print(resposta);							//Escrita da resposta
-			port = select_port(in.data[1]);				// Obtém o endereço real do hardware (ex: GPIOA)
-			if(port.channel == NULL){					//Se não conseguir, diz que a porta está fora do alcance
-				snprintf(resposta, MAX_OUT,	//Apresentação da resposta ao comando
-						"\nPORTA FORA DE ALCANCE");
-				print(resposta);			//Escrita da resposta
-				return;
-			}
-			// Valida se os pinos solicitados não são restritos
-			if(pins_restricted(port,in.data[2])){
-				snprintf(resposta, MAX_OUT,	//Apresentação da resposta ao comando
-						"\nPINOS RESTRITOS!");
-				print(resposta);			//Escrita da resposta
-				return;
-			}
-			snprintf(resposta, 1, "\0");// Limpa o buffer para a nova resposta
-			for (i=0; i<16; i++){		//Ciclo a percorrer todos os pinos da porta
-				if(in.data[2]>>i & 0x01){	// Se o bit 'i' estiver na máscara solicitada
-					// Efetua a leitura real do pino físico
-					int bit = HAL_GPIO_ReadPin(port.channel, (1 << i));
-					sprintf(temp, "%d ", bit); //Converte o pino para string
-					strcat(resposta, temp);	// Concatena na string principal
-				}
-			}
-			print(resposta);								//Escrita da resposta
-			snprintf(resposta, MAX_OUT,						//Apresentação da resposta ao comando
-							"\nLer os pinos");
-			print(resposta);							//Escrita da resposta
-			break;
-
-		case CMD_WD:									// Write Digital Output
-			list(in.data[2], active, PIN, 0);			// Converte a máscara hexadecimal para uma string legível
-			list(in.data[2], value, BIN, in.data[3]);	// Traduz os valores hexadecimais em binário (0's e 1's)
-			snprintf(resposta, MAX_OUT,					//Apresentação da resposta ao comando
-					"Escrever nos bits %s da porta %c, os valores %s ", active, in.data[1], value);
-			print(resposta);							//Escrita da resposta
-			port= select_port(in.data[1]);				// Obtém o endereço real do hardware (ex: GPIOA)
-			if(port.channel == NULL){		//Se não conseguir, diz que a porta está fora do alcance
-				snprintf(resposta, MAX_OUT,	//Apresentação da resposta ao comando
-						"\nPORTA FORA DE ALCANCE");
-				print(resposta);			//Escrita da resposta
-				return;
-			}
-			// Valida se os pinos solicitados não são restritos
-			if(pins_restricted(port,in.data[2]))/*||((port.channel->MODER >> (in.data[2] * 2)) & 0x03)==0x01)*/{
-				snprintf(resposta, MAX_OUT,	//Apresentação da resposta ao comando
-						"\nPINOS RESTRITOS!");
-				print(resposta);			//Escrita da resposta
-				return;
-			}
-			for (i=0; i<16; i++){			//Ciclo a percorrer todos os pinos da porta
-				if(in.data[2]>>i & 0x01){	// Para cada pino selecionado
-					GPIO_PinState estado = (in.data[3] >> i & 0x01) ? GPIO_PIN_SET : GPIO_PIN_RESET;
-					HAL_GPIO_WritePin(port.channel, (1 << i), estado);
-					}
-			}
-			snprintf(resposta, MAX_OUT,		//Apresentação da resposta ao comando
-					"\nEscrever os pinos");
-			print(resposta);				//Escrita da resposta
-			break;
-
-		case CMD_PWMS:									//Pulse Width Modulation (PWMS porque usámos PWM para o guia 2)
-			uint32_t num = /* 255 - */in.data[1];		//Valor de entrada
-			num *= 100;									//Multiplicação para percentagem
-			uint32_t uni = num / 255;					//Obtenção do valor inteiro (quociente)
-			uint32_t dec = num % 255;					//Obtenção do valor decimal restante (resto)
-			dec*=100;									//Multiplicação para percentagem da parte decimal
-			dec/=255;									//Divisão em 255 da parte decimal
-
-			snprintf(resposta, MAX_OUT,					//Apresentação da resposta ao comando
-					"Duty-cycle de %d.%d%%", uni, dec);
-			print(resposta);							//Escrita da resposta
-			num /= 100;									//Valor de entrada a dividir por 100
-						//uint16_t current_CCR = __HAL_TIM_GET_COMPARE(&htim3, TIM_CHANNEL_3);
-
-			// Atualiza o registo de comparação do Timer (CCR) para mudar a largura do pulso
-			// Próximo valor = (Proporção com 255) * Valor do Auto-Reload do Timer
-			uint16_t next_CCR = (((num * (__HAL_TIM_GET_AUTORELOAD(&htim3))) / 255) > TIM3_ARR)  ? 0 : ((num * (__HAL_TIM_GET_AUTORELOAD(&htim3))) / 255);
-			__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, next_CCR);
-			//HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_3);
-			break;
-
-		case CMD_RA:									// Read Analog (ADC)
-			snprintf(resposta, MAX_OUT,					//Apresentação da resposta ao comando
-					"Ler o canal %d de um ADC pre-determinado", in.data[1]);
-			print(resposta);								//Escrita da resposta
-			ADC_CH_Cfg.Rank =  ADC_REGULAR_RANK_1;			//ADC escolhido (ADC 1)
-			ADC_CH_Cfg.Channel = ADC_Channels[in.data[1]];  //Escolher o canal a ser lido no ADC
-			HAL_ADC_ConfigChannel(&hadc1, &ADC_CH_Cfg);		//Confirmação das definições anteriores
-			HAL_ADC_Start(&hadc1); 						// Ativa o periférico ADC
-			if (HAL_ADC_PollForConversion(&hadc1, MAX_ADC) == HAL_OK) { // Aguarda a conversão (Polling) com o timeout definido (10ms)
-				uint32_t val = HAL_ADC_GetValue(&hadc1);				// Valor de 12 bits (0-4095): (2^12) - 1 = 4096 - 1 = 4095
-			    uint32_t v_total = (val * 330) / 4095;					// Converte para tensão: V = (Valor * 3.3V) / 4095. Multiplicado por 100 para evitar floats
-			    int uni = v_total / 100;								//Obtenção do valor da tensão inteiro (quociente)
-			    int dec = v_total % 100;								//Obtenção do valor decimal da tensão restante (resto)
-		        snprintf(resposta, MAX_OUT, "\nADC: %d.%02dV ", uni, dec);	//Mensagem do read analog
-		    } else {
-		        snprintf(resposta, MAX_OUT, "\nErro: Timeout ADC ");	//Erro de timeout
-		    }
-		    print(resposta);				//Escrita da resposta
-		    HAL_ADC_Stop(&hadc1);			//Desliga o ADC
-			break;
-		//------------------------------------------------------------------------------------------------------------------------------------------------------------------
 		case CMD_CS:									// Execução da mudança de estado
 			snprintf(resposta, MAX_OUT,					// Prepara a string de resposta informativa para o utilizador
 					"\r\nDefine o estado como %d", in.data[1]);
@@ -1173,15 +690,14 @@ void execute(Tokens in){ //Função execute
 	case ERR_OVR:										//Erro de overflow
 		print("\r\nOVERFLOW DE PARAMETROS!");
 		break;
-//	case ERR_STATE:										//Erro de estados
-//		print("ERRO DE ESTADOS!");
-//		break;
 	default:											//Erro por defeito
-		print("\rERRO INTERNO!");
+		print("\r\nERRO INTERNO!");
 		break;
 	}
 
 }
+//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 void read(int l){								// Leitura da posição e da velocidade
 	float PosRad = (inc_pos*(2.0*M_PI))/960.0;	// Conversão da posição para radianos
 	float PosGra = (inc_pos*360.0)/960.0;		// Conversão da posição para RPM
@@ -1197,7 +713,7 @@ void read(int l){								// Leitura da posição e da velocidade
 	}
 	if(RT!=0)				// Leitura da velocidade
 		snprintf(resposta, MAX_OUT,
-				"\r\nVel: %0.3f rad/s | %0.3f rpm - [%d]\r\n", VelRad, VelGra, l);
+				"\r\nVel: %0.3f rad/s | %0.3f rpm %c %d voltas - [%d]\r\n", VelRad, VelGra, dir?'+':'-', vol, l);
 		print(resposta);
 }
 //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -1318,6 +834,7 @@ void state_machine(){
 		break;
 	}
 }
+//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 /* USER CODE END 0 */
 
 /**
@@ -1373,10 +890,6 @@ Error_Handler();
 /* USER CODE END Boot_Mode_Sequence_2 */
 
   /* USER CODE BEGIN SysInit */
-	//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-
-	//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-
 
   /* USER CODE END SysInit */
 
@@ -1384,16 +897,10 @@ Error_Handler();
   MX_GPIO_Init();
   MX_USART3_UART_Init();
   MX_TIM3_Init();
-  MX_ADC1_Init();
   MX_TIM6_Init();
   /* USER CODE BEGIN 2 */
   //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-  //print("Insira o comando.\n>");						//Apresenta esta mensagem inicial no termite para o utilizador
-  //printf(">");
   start_scan(rx_buff);									//Início da receção pela usart3
-  //uint16_t next_CCR = TIM3_CCR;
-  //__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, 0);    //Define o valor inicial do Duty Cycle para 0 (0%)
-  //(&htim3, TIM_CHANNEL_3);			//Ativa efetivamente a geração do sinal PWM no pino físico
   //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
   /* USER CODE END 2 */
 
@@ -1407,6 +914,7 @@ Error_Handler();
 	  //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 	  //Bloco de processamento de comandos (consumidor)
 	  state_machine();									//Chama a máquina de estados
+	  //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
   }
   /* USER CODE END 3 */
 }
@@ -1464,8 +972,7 @@ void SystemClock_Config(void)
 /* USER CODE BEGIN 4 */
 volatile int comp = 0;							//Variável para se saber o valor atual do PWM
 //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)	//Callback de Evento de Receção UART: Executado automaticamente pelo hardware
-{
+void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size){	//Callback de Evento de Receção UART: Executado automaticamente pelo hardware
 char resposta[MAX_CHAR];									//Resposta ao utilizador
 int arr = __HAL_TIM_GET_AUTORELOAD(&htim3);					//Valor do registo de Auto-Reload do timer3
     if (huart->Instance == USART3){							//Verifica se a interrupção veio da USART3 (ligada ao ST-Link/Terminal do PC)
@@ -1473,78 +980,87 @@ int arr = __HAL_TIM_GET_AUTORELOAD(&htim3);					//Valor do registo de Auto-Reloa
     	data_ready = 2;										//Não foi uma receção completa, por caracter
     	int inc = (5*(arr+1))/100;							//(Vcc*<signVal>) / 100
         if(rx_buff[0]=='\\'){								//Se o utilizador escreveu backslash
-        	if(dir){
-        		comp = __HAL_TIM_GET_COMPARE(&htim3, TIM_CHANNEL_1);
-        		comp -= inc;
-        		if(comp<0){
-        			__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 0);
-        			comp=-comp;
-        			__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, comp);
-        			dir=0;
-        		}else{
-        			__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, comp);
-        		}
+        	if(CS == 2){
+				if(dir){
+					comp = __HAL_TIM_GET_COMPARE(&htim3, TIM_CHANNEL_1);
+					comp -= inc;
+					if(comp<0){
+						__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 0);
+						comp=-comp;
+						__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, comp);
+						dir=0;
+					}else{
+						__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, comp);
+					}
+				}else{
+					comp = __HAL_TIM_GET_COMPARE(&htim3, TIM_CHANNEL_2);
+					comp += inc;
+					if(comp>arr){
+						__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, arr);
+						comp=arr;
+					}else{
+						__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, comp);
+					}
+				}
+				snprintf(resposta, MAX_OUT,					// Mostra o valor atual do PWM depois de backslash
+								"\r\nPWM: %c%d > ", dir?'+':'-',((comp+1)*100/(arr+1)));
+				print(resposta);
         	}else{
-        		comp = __HAL_TIM_GET_COMPARE(&htim3, TIM_CHANNEL_2);
-        		comp += inc;
-        		if(comp>arr){
-        			__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, arr);
-        			comp=arr;
-        		}else{
-        			__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, comp);
-        		}
+        		snprintf(resposta, MAX_OUT,				// Impede o controlo manual do PWM se o sistema estiver em Modo Automático (Estado 3)
+        						"\r\nESTADO ERRADO!");
+        		print(resposta);
         	}
-        	snprintf(resposta, MAX_OUT,					// Mostra o valor atual do PWM depois de backslash
-        					"\r\nPWM: %c%d > ", dir?'+':'-',((comp+1)*100/(arr+1)));
-        	print(resposta);
         }else if(rx_buff[0]=='/'){ //Se o utilizador escreveu /
-        	if(dir){
-        		comp = __HAL_TIM_GET_COMPARE(&htim3, TIM_CHANNEL_1);
-        		comp += inc;
-        		if(comp>arr){
-        		 	__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, arr);
-        		 	comp=arr;
-        		}else{
-        		    __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, comp);
-        		}
+        	if(CS==2){
+				if(dir){
+					comp = __HAL_TIM_GET_COMPARE(&htim3, TIM_CHANNEL_1);
+					comp += inc;
+					if(comp>arr){
+						__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, arr);
+						comp=arr;
+					}else{
+						__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, comp);
+					}
+				}else{
+					comp = __HAL_TIM_GET_COMPARE(&htim3, TIM_CHANNEL_2);
+					comp -= inc;
+					if(comp<0){
+						__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, 0);
+						comp=-comp;
+						__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, comp);
+						dir=1;
+					}else{
+						__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, comp);
+					}
+				}
+				snprintf(resposta, MAX_OUT,					// Mostra o valor atual do PWM depois de barra
+								"\r\nPWM: %c%d > ", dir?'+':'-', ((comp+1)*100/(arr+1)));
+				print(resposta);
         	}else{
-        		comp = __HAL_TIM_GET_COMPARE(&htim3, TIM_CHANNEL_2);
-        		comp -= inc;
-        		if(comp<0){
-        		    __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, 0);
-        		    comp=-comp;
-        		    __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, comp);
-        		    dir=1;
-        		}else{
-        		    __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, comp);
-        		}
+        		snprintf(resposta, MAX_OUT,				// Impede o controlo manual do PWM se o sistema estiver em Modo Automático (Estado 3)
+        						"\r\nESTADO ERRADO!");
+        		print(resposta);
         	}
-        	snprintf(resposta, MAX_OUT,					// Mostra o valor atual do PWM depois de barra
-        					"\r\nPWM: %c%d > ", dir?'+':'-', ((comp+1)*100/(arr+1)));
-        	print(resposta);
         }else{
         	int current_len = strlen(input); //Mostra o que temos até agora
-        	if (current_len < (MAX_CHAR - 1)) {
-        	     input[current_len] = rx_buff[0];
-        	     input[current_len + 1] = '\0'; //Caracter delimitador nulo
+        	if (rx_buff[0] == 0x08 || rx_buff[0] == 0x7F) { //Se escrevermos um delete
+        	    if (current_len > 0) {
+        	        input[current_len - 1] = '\0'; // Remove o último caractere
+        	        print(" \b");
+        	    }
+        	}else{
+        		if (current_len < (MAX_CHAR - 1)) {
+        	     	 input[current_len] = rx_buff[0];
+        	     	 input[current_len + 1] = '\0'; //Caracter delimitador nulo
+        		}
         	}
             if (rx_buff[0] == '\r' || rx_buff[0] == '\n') {
                  data_ready = 1;				//A flag de receção foi ativada
             }
         }
-//        }else{
-//        	strcat(input, rx_buff);
-//        	if(rx_buff[0]=='\n'){
-//        		data_ready = 1; 				//Ativa a flag de sinalização. O loop principal (while(1)) verá este '1' e saberá que pode começar a processar o comando.
-//        	}
-//        }
     }
 }
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim){ //Callback do Período do Timer: Executado quando o contador do Timer atinge o valor de Auto-Reload (ARR)
-//	if (htim == &htim3){ 				// Filtra para garantir que estamos a reagir apenas ao Timer 3
-//		//ov = 1; 						// Sinaliza que o período de tempo decorreu (Overflow).
-//										//As ISR devem ser o mais curtas possível!
-//	}
 	if (htim == &htim6){ 				// Filtra para garantir que estamos a reagir apenas ao Timer 6
 		ov = 1; 						// Sinaliza que o período de tempo decorreu (Overflow).
 										//As ISR devem ser o mais curtas possível!
