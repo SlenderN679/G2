@@ -86,14 +86,14 @@ volatile uint8_t ov;													  //Variável para a flag de interrupção gen�
 volatile int inc_pos=0;													  //Variável para incremento da posição
 volatile int inc_vel=0;													  //Variável para incremento da velocidade
 volatile int lim=0;														  //Variável para definir o limite das voltas (10)
-volatile int vol=0;														  //Variável para voltas
+volatile int vol=0;														  //Variável para a volta atual
 volatile int dir=0;														  //Variável de direção
 int CS=0;																  //Variável de estado do Sistema de Controlo (0:Reset, 1:Config, 2:Manual, 3:Auto)
 //int last_CS=0;
 int EN=0;																  //Variável de ativação (Enable) dos motores (0: Desligado, 1: Ligado)
 int R=0;																  //Variável da Leitura (neste caso, termina a amostragem, seja do modo contínuo ou do modo limitado)
 int RT=2;																  //Variável de definição de leitura (neste caso definido para leitura da posição e da velocidade)
-int laps=0;																  //Nº de voltas
+int laps=0;																  //Nº de voltas totais
 char resposta[MAX_OUT] = {};											  //Resposta ao utilizador
 
 //uint8_t Per = 499;
@@ -754,6 +754,15 @@ void execute(Tokens in){ //Função execute
 			print("WD <portAddr> <pinsMap> <pinValues> - Escrever nos bits <pinsMap> da porta <portAddr>, os valores <pinValues>\r\n");
 			print("PWM <dutyCycle>                                            - Duty-cycle de <dutyCycle>%\r\n");
 			print("RA <addr>                                                           - Ler o canal <addr> de um ADC pre-determinado");
+
+			print("CS <dig>                                                    - Definicao do estado de funcionamento da maquina de estados");
+			print("EN <dig>                                                     - Ativação dos motores");
+			print("HW <uint>                                                    - Periodo de amostragem");
+			print("RT <dig>                                                      - Configuracao do tipo de leitura");
+			print("R <dig> <uint>                                                - Leitura");
+			print("PWM <signval>                                                  - Pulse Width Modulation em tensao normalizada");
+			print("RESPOS                                                         - Reinicializacao da posicao 0 do disco");
+			print("PID <dig> <float>                                              - Configuracao de variaveis e parametros do controlador PID");
 			break;
 
 		case CMD_MR:									//Memory Read
@@ -1186,16 +1195,16 @@ void read(int l){								// Leitura da posição e da velocidade
 	float PosRad = (inc_pos*(2.0*M_PI))/960.0;	// Conversão da posição para radianos
 	float PosGra = (inc_pos*360.0)/960.0;		// Conversão da posição para RPM
 
-	float pulse = (float)inc_vel/(__HAL_TIM_GET_AUTORELOAD(&htim6)/1000.0);
+	float pulse = (float)inc_vel/(__HAL_TIM_GET_AUTORELOAD(&htim6)/1000.0);	//Nº de pulsos
 	float VelRad = (pulse*(2.0*M_PI))/960.0;			// Conversão da velocidade em rad/s
 	float VelGra = (pulse*60.0)/960.0;					// Conversão da velocidade em rpm
-	inc_vel=0;
-	if(RT!=1){					// Leitura da posição
+	inc_vel=0;											// Reinício da velocidade
+	if(RT!=1){											// Leitura da posição
 		snprintf(resposta, MAX_OUT,
 					"\r\nPos: %0.3f rad | %0.3f deg %c %d voltas - [%d]\r\n", PosRad, PosGra, dir?'+':'-', vol, l);
 		print(resposta);
 	}
-	if(RT!=0)				// Leitura da velocidade
+	if(RT!=0)											// Leitura da velocidade
 		snprintf(resposta, MAX_OUT,
 				"\r\nVel: %0.3f rad/s | %0.3f rpm - [%d]\r\n", VelRad, VelGra, l);
 		print(resposta);
@@ -1203,7 +1212,7 @@ void read(int l){								// Leitura da posição e da velocidade
 //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 int l = 0;												//Volta atual
-int main_loop(void){
+int main_loop(void){									//Ciclo principal
 	char resposta[MAX_OUT] = {};						//Resposta ao utilizador
 	if(data_ready == 1){ 								//Verifica se a flag de receção foi ativada
 		upperCase(input);								//Se foi, garante que todos os comandos recebidos ficam apenas em maiúsculas (por causa do Case Sensitivity)
@@ -1218,11 +1227,11 @@ int main_loop(void){
 		// Reinício da escuta da UART
 		if(start_scan(rx_buff) != HAL_OK){				// Tenta reativar o modo de receção
 		 __HAL_UART_CLEAR_OREFLAG(&huart3);				//Limpa o erro de Overrun para desbloquear o periférico
-		 start_scan(rx_buff);								// Segunda tentativa de arranque após limpeza do erro
+		 start_scan(rx_buff);							// Segunda tentativa de arranque após limpeza do erro
 		}
 		return 1;
 	}
-	if(data_ready == 2){
+	if(data_ready == 2){								//Se não foi uma receção completa por caracter
 		data_ready = 0;									//Reinicia a flag de receção
 		snprintf(resposta,MAX_OUT, "%c", rx_buff[0]);
 		print(resposta);
@@ -1235,12 +1244,12 @@ int main_loop(void){
 		ov = 0;											// Reset da flag (acknowledge)
 	  	HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_0);			// Indicação visual que o código não "encravou" e o loop principal continua a correr
 		switch(R){										//Casos de leitura
-		case 0:											//Ler só posição
+		case 0:											// Termina a amostragem, seja do modo contínuo ou do modo limitado
 			break;
-		case 1:											//Ler só velocidade
+		case 1:											//Pedido de leituras contínuas, para um período de amostragem definido pelo período de amostragem (HW)
 			read(l);
 			break;
-		case 2:											//Ler posição e velocidade
+		case 2:											//é acionado o pedido de leituras limitadas, com a quantidade de amostras indicada em <uint> (número máximo de amostras de 1000 para a amostragem limitada), para um período de amostragem definido por HW
 			if(l++<laps){
 				read(l);
 			}else{
@@ -1262,7 +1271,7 @@ int main_loop(void){
 }
 //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-void state_machine(){
+void state_machine(){										//Máquina de estados
 	switch(CS){												//Switch Case para todos os casos
 	case 0:													//Estado 0: Reset
 		print("\r\n\r\nRESET- - - - - - - - - - -");		//Confirmação do estado
@@ -1272,7 +1281,7 @@ void state_machine(){
 		__HAL_TIM_SET_AUTORELOAD(&htim6, 10-1);				//Período de 10ms
 		__HAL_TIM_SET_COUNTER(&htim6, 0);					//Reset do contador
 		//RT
-		RT=1;												//Leitura de velocidade
+		RT=1;												//Leitura da velocidade
 		//PWM
 		__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, 0);    //Canal de direção -
 		__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 0); 	//Canal de direção +
@@ -1494,7 +1503,7 @@ int arr = __HAL_TIM_GET_AUTORELOAD(&htim3);					//Valor do registo de Auto-Reloa
         			__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, comp);
         		}
         	}
-        	snprintf(resposta, MAX_OUT,					// Mostra o valor atual do PWM depois de backslash
+        	snprintf(resposta, MAX_OUT,					// Mostra o valor atual do PWM depois do backslash
         					"\r\nPWM: %c%d > ", dir?'+':'-',((comp+1)*100/(arr+1)));
         	print(resposta);
         }else if(rx_buff[0]=='/'){ //Se o utilizador escreveu /
@@ -1535,18 +1544,18 @@ int arr = __HAL_TIM_GET_AUTORELOAD(&htim3);					//Valor do registo de Auto-Reloa
 //        }else{
 //        	strcat(input, rx_buff);
 //        	if(rx_buff[0]=='\n'){
-//        		data_ready = 1; 				//Ativa a flag de sinalização. O loop principal (while(1)) verá este '1' e saberá que pode começar a processar o comando.
+//        		data_ready = 1; 				//Ativa a flag de sinalização. O loop principal (while(1)) verá este '1' e saberá que pode começar a processar o comando
 //        	}
 //        }
     }
 }
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim){ //Callback do Período do Timer: Executado quando o contador do Timer atinge o valor de Auto-Reload (ARR)
 //	if (htim == &htim3){ 				// Filtra para garantir que estamos a reagir apenas ao Timer 3
-//		//ov = 1; 						// Sinaliza que o período de tempo decorreu (Overflow).
+//		//ov = 1; 						// Sinaliza que o período de tempo decorreu (Overflow)
 //										//As ISR devem ser o mais curtas possível!
 //	}
 	if (htim == &htim6){ 				// Filtra para garantir que estamos a reagir apenas ao Timer 6
-		ov = 1; 						// Sinaliza que o período de tempo decorreu (Overflow).
+		ov = 1; 						// Sinaliza que o período de tempo decorreu (Overflow)
 										//As ISR devem ser o mais curtas possível!
 	}
 }
