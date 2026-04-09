@@ -22,6 +22,12 @@
 #include "usart.h"
 #include "gpio.h"
 
+/*++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ * Trabalho realizado por:
+ * Nuno Costa a107069
+ * Afonso Carvalho a107058
+ ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++*/
+
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 
@@ -426,6 +432,121 @@ Tokens parse(char in[MAX_CHAR], const char delim[MAX_DELIM]){		//Função de tok
 }
 //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+// Variáveis de estado do sistema
+float yr = 1.0;       // Variável de referência
+float y = 0.0;        // Variável medida (posição atual lida pelo encoder)
+float e = 0.0;        // Erro atual
+float e_ant = 0.0;    // Erro da iteração anterior
+float sum_e = 0.0;    // Somatório dos erros (para a ação integral)
+float y_ant = 0.0;    // Posição medida na iteração anterior
+float u_d = 0.0;      // Ação derivativa atual
+float u_d_ant = 0.0;  // Ação derivativa da iteração anterior
+float u = 0.0;        // Variável de comando a aplicar no PWM
+
+// Parâmetros do controlador (atualizados via interface)
+#define h 0.01
+#define a 1
+float Kp_h = 0.0;
+float Ki_h = 0.0*h;
+float Kd_h = (0.05*(1-a))/h;
+       // Constante do filtro passa-baixo da derivada
+
+// Limites de saturação de tensão definidos no guião
+const float U_sat_a = 6.0;   // Saturação superior (6 V)
+const float U_sat_b = -6.0;  // Saturação inferior (-6 V)
+
+int point=0;
+float in[] = {			//entrada trig
+	    1.000, 1.200, 1.400, 1.600, 1.800, 2.000,
+	    1.800, 1.600, 1.400, 1.200, 1.000, 0.800, 0.600, 0.400, 0.200, 0.000,
+	    0.200, 0.400, 0.600, 0.800, 1.000, 1.200, 1.400, 1.600, 1.800, 2.000,
+	    1.800, 1.600, 1.400, 1.200, 1.000, 0.800, 0.600, 0.400, 0.200, 0.000,
+	    0.200, 0.400, 0.600, 0.800, 1.000, 1.200, 1.400, 1.600, 1.800, 2.000,
+	    1.800, 1.600, 1.400, 1.200, 1.000
+	};
+			 /*{		//entrada quad
+	    // t = 0.00 a 0.05
+	    0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+	    // t = 0.06 a 0.15
+	    2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0,
+	    // t = 0.16 a 0.25
+	    0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+	    // t = 0.26 a 0.35
+	    2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0,
+	    // t = 0.36 a 0.45
+	    0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+	    // t = 0.46 a 0.50
+	    2.0, 2.0, 2.0, 2.0, 2.0
+	};*/
+float ex[] = {		//saida filter
+	    -1.000000, -1.000000, -1.000000, -1.000000, -1.000000, -1.000000,
+	     0.333333,  0.777778,  0.925926,  0.975309,  0.991770,  0.997256,  0.999085,  0.999695,  0.999898,  0.999966,
+	    -0.333333, -0.777778, -0.925926, -0.975309, -0.991770, -0.997256, -0.999085, -0.999695, -0.999898, -0.999966,
+	     0.333333,  0.777778,  0.925926,  0.975309,  0.991770,  0.997256,  0.999085,  0.999695,  0.999898,  0.999966,
+	    -0.333333, -0.777778, -0.925926, -0.975309, -0.991770, -0.997256, -0.999085, -0.999695, -0.999898, -0.999966,
+	     0.333333,  0.777778,  0.925926,  0.975309,  0.991770
+	};
+			 /*{		//saida difer
+		   -1.000, -1.000, -1.000, -1.000, -1.000, -1.000,
+		    1.000,  1.000,  1.000,  1.000,  1.000,  1.000,  1.000,  1.000,  1.000,  1.000,
+		   -1.000, -1.000, -1.000, -1.000, -1.000, -1.000, -1.000, -1.000, -1.000, -1.000,
+		    1.000,  1.000,  1.000,  1.000,  1.000,  1.000,  1.000,  1.000,  1.000,  1.000,
+		   -1.000, -1.000, -1.000, -1.000, -1.000, -1.000, -1.000, -1.000, -1.000, -1.000,
+		    1.000,  1.000,  1.000,  1.000,  1.000
+		};*/
+			 /*{		//saida integ
+	    // t = 0.00 a 0.05 (Subida inicial)
+	    0.0,  0.2,  0.4,  0.6,  0.8,  1.0,
+	    // t = 0.06 a 0.15 (Pico de 1.2 e descida até -0.6)
+	    1.2,  1.0,  0.8,  0.6,  0.4,  0.2,  0.0, -0.2, -0.4, -0.6,
+	    // t = 0.16 a 0.25 (Pico negativo de -0.8 e subida até 1.0)
+	   -0.8, -0.6, -0.4, -0.2,  0.0,  0.2,  0.4,  0.6,  0.8,  1.0,
+	    // t = 0.26 a 0.35 (Pico de 1.2 e descida até -0.6)
+	    1.2,  1.0,  0.8,  0.6,  0.4,  0.2,  0.0, -0.2, -0.4, -0.6,
+	    // t = 0.36 a 0.45 (Pico negativo de -0.8 e subida até 1.0)
+	   -0.8, -0.6, -0.4, -0.2,  0.0,  0.2,  0.4,  0.6,  0.8,  1.0,
+	    // t = 0.46 a 0.50 (Pico de 1.2 e início de nova descida)
+	    1.2,  1.0,  0.8,  0.6,  0.4
+	};*/
+
+			/*{	//saida prop
+	    // t = 0.00 a 0.05
+	    1.5, 1.5, 1.5, 1.5, 1.5, 1.5,
+	    // t = 0.06 a 0.15
+	    -1.5, -1.5, -1.5, -1.5, -1.5, -1.5, -1.5, -1.5, -1.5, -1.5,
+	    // t = 0.16 a 0.25
+	    1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5,
+	    // t = 0.26 a 0.35
+	    -1.5, -1.5, -1.5, -1.5, -1.5, -1.5, -1.5, -1.5, -1.5, -1.5,
+	    // t = 0.36 a 0.45
+	    1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5,
+	    // t = 0.46 a 0.50
+	    -1.5, -1.5, -1.5, -1.5, -1.5
+	};*/
+void ISR_PID(void) {
+    float sum_e_backup;
+    y = in[point];
+    e = yr - y;
+    sum_e_backup = sum_e;
+    sum_e = sum_e + e_ant;
+    u_d = Kd_h * (y - y_ant) + a * u_d_ant;
+    u = Kp_h * e + Ki_h * sum_e - u_d;
+    e_ant = e;
+    y_ant = y;
+    u_d_ant = u_d;
+    if (u > U_sat_a) {
+        u = U_sat_a;
+        sum_e = sum_e_backup;
+    } else if (u < U_sat_b) {
+        u = U_sat_b;
+        sum_e = sum_e_backup;
+    }
+    snprintf(resposta, MAX_OUT,
+            		"\r\nIn - %0.3f; Out - %0.3f; Expected - %0.3f", y, u, ex[point]);
+    print(resposta);
+}
+//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 void enable(int e){
 	EN=e;
 	if(EN){								// Se o comando for para ativar o motor (EN = 1)
@@ -433,7 +554,7 @@ void enable(int e){
 		HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
 		HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_2);
 		HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_3);
-		HAL_TIM_Base_Start_IT(&htim6);		//início do timer para o PWM
+		//HAL_TIM_Base_Start_IT(&htim6);		//início do timer para o PWM
 		HAL_GPIO_WritePin(GPIOB, ENABLE_Pin, GPIO_PIN_SET);
 		HAL_GPIO_WritePin(GPIOB, ENABLE2_Pin, GPIO_PIN_SET);
 
@@ -442,7 +563,7 @@ void enable(int e){
 		HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_1);
 		HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_2);
 		HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_3);
-		HAL_TIM_Base_Stop_IT(&htim6);		//início do timer para o PWM
+		//HAL_TIM_Base_Stop_IT(&htim6);		//início do timer para o PWM
 		HAL_GPIO_WritePin(GPIOB, ENABLE_Pin,GPIO_PIN_RESET);
 		HAL_GPIO_WritePin(GPIOB, ENABLE2_Pin,GPIO_PIN_RESET);
 		vol = 0;
@@ -750,24 +871,31 @@ int main_loop(void){
 	if (ov){											// Verifica se a flag de overflow está ativa
 		ov = 0;											// Reset da flag (acknowledge)
 	  	HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_0);			// Indicação visual que o código não "encravou" e o loop principal continua a correr
-		switch(R){										//Casos de leitura
-		case 0:											//Ler só posição
-			break;
-		case 1:											//Ler só velocidade
-			read(l);
-			break;
-		case 2:											//Ler posição e velocidade
-			if(l++<laps){
+		if(CS!=3){
+			switch(R){										//Casos de leitura
+			case 0:											//Ler só posição
+				break;
+			case 1:											//Ler só velocidade
 				read(l);
-			}else{
-				R=0;
+				break;
+			case 2:											//Ler posição e velocidade
+				if(l++<laps){
+					read(l);
+				}else{
+					R=0;
+					l=0;
+				}
+				break;
+			default:
 				l=0;
+				R=0;
+				break;
 			}
-			break;
-		default:
-			l=0;
-			R=0;
-			break;
+		}else{
+			if(point<50){
+				ISR_PID();
+				point++;
+			}
 		}
 	}
 	if(lim){										//Se atingimos o limite de voltas
@@ -809,16 +937,20 @@ void state_machine(){
 	case 2:													// Estado 2: Modo Manual
 		print("\r\n\r\nMANUAL- - - - - - - - - - -");		// Confirmação do estado
 		print("\r\n[MANUAL]>");								// Prompt visual para o utilizador
+		HAL_TIM_Base_Start_IT(&htim6);
 		while (CS==2){										// Permite o controlo direto e a leitura de sensores em malha aberta
 			if(main_loop()){
 			print("\r\n[MANUAL]>");							// Prompt visual para o utilizador
 			}
 		}
+		HAL_TIM_Base_Stop_IT(&htim6);
 		break;
 	case 3:													//Estado 3: Modo Automático
 		print("\r\n\r\nAUTO- - - - - - - - - - -");			//Confirmação do estado
 		print("\r\n[AUTO]>");								// Prompt visual para o utilizador
 		enable(1);											//Ativação dos pinos de enable
+		HAL_TIM_Base_Start_IT(&htim6);
+		point=0;
 		while (CS==3){ 										//Enquanto ficarmos neste estado
 			if(main_loop()){
 			print("\r\n[AUTO]>");							// Prompt visual para o utilizador
@@ -828,6 +960,7 @@ void state_machine(){
 				CS=1;
 			}
 		}
+		HAL_TIM_Base_Stop_IT(&htim6);
 		break;
 	default:												//Por defeito, começa-se sempre no estado 0
 		CS = 0;
