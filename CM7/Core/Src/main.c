@@ -22,12 +22,6 @@
 #include "usart.h"
 #include "gpio.h"
 
-/*++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
- * Trabalho realizado por:
- * Nuno Costa a107069
- * Afonso Carvalho a107058
- ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++*/
-
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 
@@ -207,18 +201,75 @@ Error validate(char par[], int digits, int type, int *out, int hex){ 		//Funçã
 			return ERR;												// Retorna erro se o parâmetro tiver mais do que um dígito
 			break;
 		case FLOAT:
-			if((par[1]!='.') && (par[1]!=',')) return ERR;				// Verifica se o segundo caractere é um separador decimal válido (. ou ,)
-			for(i=0; i<digits; i+=2){									// Ciclo de validação de caracteres (garante que são dígitos antes de converter)
-				if(par[i]=='\0') break;									//Se a string não utilizar todos os caracteres disponíveis, acaba o ciclo
-				if(!isxdigit(par[i])) return ERR;						//Se o utilizador escrever algo que não seja um dígito, retorna erro
-				if((uint32_t)strtoul(par[i], NULL, 16)>9) return ERR;	//Se o utilizador puser um número float cujos dígitos não estejam entre 0 e 9, retorna erro(não dá a conversão para um número unsigned int)
-			}
-			// Conversão "manual" da string fixa (x.y) para um inteiro representativo
-			int uniF = par[0]-'0';										// Converte o caractere da unidade em valor inteiro
-			int decF = par[2]-'0';										// Converte o caractere da décima em valor inteiro
-			num = uniF*10 + decF;										// Armazena como valor fixo (ex: 3.4 vira 34) para facilitar os cálculos
-			*out = num;													// Atribui o valor convertido à variável de saída
-			break;
+		    int uniF = 0;
+		    int decF = 0;
+		    int sign = 1;
+		    int startIdx = 0;
+		    int dotIdx = 2; // Default dot position for positive (XX.YY)
+
+		    // 1. Handle Sign
+		    if (par[0] == '-') {
+		        sign = -1;
+		        startIdx = 1;
+		        dotIdx = 3; // Shift dot position for negative (-XX.YY)
+		    }
+
+		    // 2. Validate Decimal Separator
+		    if (par[dotIdx] != '.' && par[dotIdx] != ',') return ERR;
+
+		    // 3. Validate Digits
+		    for (i = startIdx; i < digits; i++) {
+		        if (par[i] == '\0') break;
+		        if (i == dotIdx) continue; // Skip the dot/comma
+		        if (par[i] < '0' || par[i] > '9') return ERR;
+		    }
+
+		    // 4. Manual Conversion (Assuming format XX.YY or -XX.YY)
+		    if (sign == 1) {
+		        uniF = (par[0] - '0') * 10 + (par[1] - '0');
+		        decF = (par[3] - '0') * 10 + (par[4] - '0');
+		    } else {
+		        uniF = (par[1] - '0') * 10 + (par[2] - '0');
+		        decF = (par[4] - '0') * 10 + (par[5] - '0');
+		    }
+
+		    // 5. Combine and Apply Sign
+		    // Calculation: (Units * 100 + Decimals) * Sign
+		    num = (uniF * 100 + decF) * sign;
+		    *out = num;
+		    break;
+//			int uniF;
+//			int decF;
+//			if(par[0]=='-'){
+//				if((par[3]!='.') && (par[3]!=',')) return ERR;				// Verifica se o segundo caractere é um separador decimal válido (. ou ,)
+//				for(i=1; i<digits; i++){									// Ciclo de validação de caracteres (garante que são dígitos antes de converter)
+//					if(i!=3){
+//						if(par[i]=='\0') break;									//Se a string não utilizar todos os caracteres disponíveis, acaba o ciclo
+//						if(par[i]<'0'||par[i]>'9') return ERR;
+//				//		if(!isxdigit(par[i])) return ERR;						//Se o utilizador escrever algo que não seja um dígito, retorna erro
+//				//		if((uint32_t)strtoul(par[i], NULL, 16)>9) return ERR;	//Se o utilizador puser um número float cujos dígitos não estejam entre 0 e 9, retorna erro(não dá a conversão para um número unsigned int)
+//					}
+//				}
+//				// Conversão "manual" da string fixa (x.y) para um inteiro representativo
+//				uniF = -((par[1]-'0')*10 + par[2]-'0');										// Converte o caractere da unidade em valor inteiro
+//				decF = (par[4]-'0')*10 + par[5]-'0';										// Converte o caractere da décima em valor inteiro
+//			}else{
+//				if((par[2]!='.') && (par[2]!=',')) return ERR;				// Verifica se o segundo caractere é um separador decimal válido (. ou ,)
+//				for(i=0; i<digits-1; i++){									// Ciclo de validação de caracteres (garante que são dígitos antes de converter)
+//					if(i!=2){
+//						if(par[i]=='\0') break;									//Se a string não utilizar todos os caracteres disponíveis, acaba o ciclo
+//						if(par[i]<'0'||par[i]>'9') return ERR;
+//	//					if(!isxdigit(par[i])) return ERR;						//Se o utilizador escrever algo que não seja um dígito, retorna erro
+//	//					if((uint32_t)strtoul(par[i], NULL, 16)>9) return ERR;	//Se o utilizador puser um número float cujos dígitos não estejam entre 0 e 9, retorna erro(não dá a conversão para um número unsigned int)
+//					}
+//				}
+//				// Conversão "manual" da string fixa (x.y) para um inteiro representativo
+//				uniF = (par[0]-'0')*10 + par[1]-'0';										// Converte o caractere da unidade em valor inteiro
+//				decF = (par[3]-'0')*10 + par[4]-'0';										// Converte o caractere da décima em valor inteiro
+//			}
+//			num = uniF*100 + decF;										// Armazena como valor fixo (ex: 3.4 vira 34) para facilitar os cálculos
+//			*out = num;													// Atribui o valor convertido à variável de saída
+//			break;
 		case SIGN:														// Interpretação do sentido de rotação ou do sinal para o PWM
 			switch(par[0]){
 			case ' ':													// Espaço tratado como positivo por defeito
@@ -369,13 +420,13 @@ Tokens identify(char *in[MAX_STRING], int count){								//Função de análise 
 
 	}else if (strcmp(in[0], "PID") == 0){										////Verificação se é o comando 'PID' (ajuste das variáveis e dos parâmetros do controlador PID)
 		out.data[0] = CMD_PID;													//Ativa o comando PID
-		if(count==3){															// Espera 2 parâmetros (ex: PID 0 1.5 -> Kp=1.5)
+		if((count==3) || (count==2)){															// Espera 2 parâmetros (ex: PID 0 1.5 -> Kp=1.5)
 			char *digitStr = in[1];												// Primeiro parâmetro: �?ndice do ganho (0=P, 1=I, 2=D)
 			char *floatStr = in[2];												// Segundo parâmetro: Valor decimal do ganho
 
 			// Valida o índice como dígito (DIG) e o valor como número de vírgula flutuante (FLOAT)
 			if((validate(digitStr, 1, DIG, &(out.data[1]), 0))
-					||(validate(floatStr, 3, FLOAT, &(out.data[2]), 0))){
+					||((out.data[1]!=5)&&(validate(floatStr, 6, FLOAT, &(out.data[2]), 0)))){
 				out.state = ERR_PAR;											//Se a validação der errado, estamos com erro de parâmetros
 				return out;														//Retorna o erro de parâmetros na string de saída
 			}
@@ -420,7 +471,7 @@ Tokens parse(char in[MAX_CHAR], const char delim[MAX_DELIM]){		//Função de tok
 	 char *token = strtok(in, delim);								// Extrai o primeiro token antes do primeiro delimitador
 	 while(token!=NULL){											// Enquanto encontrar mais palavras (tokens) na string
 		 if(count >= MAX_STRING){									// Prevenção de buffer overflow de tokens
-			 //print("ERRO: Limite de tokens atingido");			//Apresenta uma mensagem de erro
+			 //print("ERRO: Limite de tokens atingido------------------------------------------------------");			//Apresenta uma mensagem de erro
 			 Tokens err;											//Variável para usar os estados da estrutura gerada pelo analisador léxico/sintático (parser)
 			 err.state = ERR_OVR;									// Retorna erro se o comando tiver demasiadas partes
 			 return err;											//Encerra o funcionamento do parse
@@ -432,8 +483,10 @@ Tokens parse(char in[MAX_CHAR], const char delim[MAX_DELIM]){		//Função de tok
 }
 //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+float PosRad=0;
+float PosGra=0;
 // Variáveis de estado do sistema
-float yr = 1.0;       // Variável de referência
+float yr = (2*M_PI);       // Variável de referência
 float y = 0.0;        // Variável medida (posição atual lida pelo encoder)
 float e = 0.0;        // Erro atual
 float e_ant = 0.0;    // Erro da iteração anterior
@@ -444,11 +497,15 @@ float u_d_ant = 0.0;  // Ação derivativa da iteração anterior
 float u = 0.0;        // Variável de comando a aplicar no PWM
 
 // Parâmetros do controlador (atualizados via interface)
-#define h 0.01
-#define a 1
-float Kp_h = 0.0;
-float Ki_h = 0.0*h;
-float Kd_h = (0.05*(1-a))/h;
+float h = 0.075;
+float a = 0;
+float Kp = 3.291140698;
+float Ki = 0.441805601;
+float Kd = 1.953626428;
+
+float Kp_h = 0;
+float Ki_h = 0;
+float Kd_h = 0;
        // Constante do filtro passa-baixo da derivada
 
 // Limites de saturação de tensão definidos no guião
@@ -465,17 +522,11 @@ float in[] = {			//entrada trig
 	    1.800, 1.600, 1.400, 1.200, 1.000
 	};
 			 /*{		//entrada quad
-	    // t = 0.00 a 0.05
 	    0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-	    // t = 0.06 a 0.15
 	    2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0,
-	    // t = 0.16 a 0.25
 	    0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-	    // t = 0.26 a 0.35
 	    2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0,
-	    // t = 0.36 a 0.45
 	    0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-	    // t = 0.46 a 0.50
 	    2.0, 2.0, 2.0, 2.0, 2.0
 	};*/
 float ex[] = {		//saida filter
@@ -495,37 +546,29 @@ float ex[] = {		//saida filter
 		    1.000,  1.000,  1.000,  1.000,  1.000
 		};*/
 			 /*{		//saida integ
-	    // t = 0.00 a 0.05 (Subida inicial)
 	    0.0,  0.2,  0.4,  0.6,  0.8,  1.0,
-	    // t = 0.06 a 0.15 (Pico de 1.2 e descida até -0.6)
 	    1.2,  1.0,  0.8,  0.6,  0.4,  0.2,  0.0, -0.2, -0.4, -0.6,
-	    // t = 0.16 a 0.25 (Pico negativo de -0.8 e subida até 1.0)
 	   -0.8, -0.6, -0.4, -0.2,  0.0,  0.2,  0.4,  0.6,  0.8,  1.0,
-	    // t = 0.26 a 0.35 (Pico de 1.2 e descida até -0.6)
 	    1.2,  1.0,  0.8,  0.6,  0.4,  0.2,  0.0, -0.2, -0.4, -0.6,
-	    // t = 0.36 a 0.45 (Pico negativo de -0.8 e subida até 1.0)
 	   -0.8, -0.6, -0.4, -0.2,  0.0,  0.2,  0.4,  0.6,  0.8,  1.0,
-	    // t = 0.46 a 0.50 (Pico de 1.2 e início de nova descida)
 	    1.2,  1.0,  0.8,  0.6,  0.4
 	};*/
 
 			/*{	//saida prop
-	    // t = 0.00 a 0.05
 	    1.5, 1.5, 1.5, 1.5, 1.5, 1.5,
-	    // t = 0.06 a 0.15
 	    -1.5, -1.5, -1.5, -1.5, -1.5, -1.5, -1.5, -1.5, -1.5, -1.5,
-	    // t = 0.16 a 0.25
 	    1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5,
-	    // t = 0.26 a 0.35
 	    -1.5, -1.5, -1.5, -1.5, -1.5, -1.5, -1.5, -1.5, -1.5, -1.5,
-	    // t = 0.36 a 0.45
 	    1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5,
-	    // t = 0.46 a 0.50
 	    -1.5, -1.5, -1.5, -1.5, -1.5
 	};*/
-void ISR_PID(void) {
-    float sum_e_backup;
-    y = in[point];
+void ISR_PID() {
+	Kp_h = Kp;
+	Ki_h = Ki*h;
+	Kd_h = (Kd*(1-a))/h;
+    float sum_e_backup = 0;
+    //y = in[point];
+    y = PosRad+(vol*2*M_PI);
     e = yr - y;
     sum_e_backup = sum_e;
     sum_e = sum_e + e_ant;
@@ -541,9 +584,45 @@ void ISR_PID(void) {
         u = U_sat_b;
         sum_e = sum_e_backup;
     }
-    snprintf(resposta, MAX_OUT,
-            		"\r\nIn - %0.3f; Out - %0.3f; Expected - %0.3f", y, u, ex[point]);
-    print(resposta);
+
+    float out = (u*100)/6;
+    if(R){
+    	snprintf(resposta, MAX_OUT,
+    					"\r\nIn - %0.3f; Out - %0.3f; PWM - %0.3f;", y, u, out);
+    	print(resposta);
+    }
+	if(abs(out)<=100){				// Valida se o Duty Cycle está entre 0% e 100%
+		// Cálculo do valor de comparação (CCR):
+		// Converte a percentagem (0-100%) para o valor proporcional ao ARR (Auto-Reload Register) do Timer.
+		int pwm=(out*__HAL_TIM_GET_AUTORELOAD(&htim3))/100;
+
+		if(out>=0) { 					// Lógica para o sentido direto (Forward / +)
+			if(dir){
+				__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, abs(pwm)); // Canal Direção +
+			}else{
+				// Define o sinal PWM no Canal 1 e desativa o Canal 2 para rodar num sentido
+				__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, 0);   // Canal Direção -
+				HAL_Delay(10);
+				__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, abs(pwm)); // Canal Direção +
+				dir=1;
+			}
+		} else { 							// Lógica para o sentido inverso (Reverse / -)
+			if(!dir){
+				__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, abs(pwm)); // Canal Direção -
+			}else{
+				// Desativa o Canal 1 e define o sinal PWM no Canal 2 para inverter a polaridade na Ponte-H
+				__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 0);   // Canal Direção +
+				HAL_Delay(10);
+				__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, abs(pwm)); // Canal Direção -
+				dir=0;
+			}
+		}
+    }else{
+    	snprintf(resposta, MAX_OUT,			// Erro se o utilizador tentar definir mais de 100% de PWM
+    			"\r\nERRO INTERNO!------------------------------------------------------");
+    	print(resposta);
+    }
+
 }
 //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -555,7 +634,7 @@ void enable(int e){
 		HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_2);
 		HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_3);
 		//HAL_TIM_Base_Start_IT(&htim6);		//início do timer para o PWM
-		HAL_GPIO_WritePin(GPIOB, ENABLE_Pin, GPIO_PIN_SET);
+		HAL_GPIO_WritePin(GPIOB, ENABLE1_Pin, GPIO_PIN_SET);
 		HAL_GPIO_WritePin(GPIOB, ENABLE2_Pin, GPIO_PIN_SET);
 
 	}else{								// Se o comando for para desativar o motor (EN = 0)
@@ -564,7 +643,7 @@ void enable(int e){
 		HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_2);
 		HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_3);
 		//HAL_TIM_Base_Stop_IT(&htim6);		//início do timer para o PWM
-		HAL_GPIO_WritePin(GPIOB, ENABLE_Pin,GPIO_PIN_RESET);
+		HAL_GPIO_WritePin(GPIOB, ENABLE1_Pin,GPIO_PIN_RESET);
 		HAL_GPIO_WritePin(GPIOB, ENABLE2_Pin,GPIO_PIN_RESET);
 		vol = 0;
 	}
@@ -609,12 +688,12 @@ void execute(Tokens in){ //Função execute
 					CS = in.data[1];					// Atualiza a variável global que controla o fluxo da máquina de estados
 				}else{
 					snprintf(resposta, MAX_OUT,			// Prepara uma mensagem de erro se a transição for inválida
-							"\r\nERRO DE ESTADO!");		// Bloqueia as transições não permitidas (por exemplo: Manual -> Auto diretamente não dá)
+							"\r\nERRO DE ESTADO!------------------------------------------------------");		// Bloqueia as transições não permitidas (por exemplo: Manual -> Auto diretamente não dá)
 					print(resposta);					// Envia o aviso de erro ao utilizador
 				}
 			}else{
 				snprintf(resposta, MAX_OUT,				// Prepara uma mensagem caso o utilizador insira um número > 3
-						"\r\nERRO DE VALOR!");
+						"\r\nERRO DE VALOR!------------------------------------------------------");
 				print(resposta);						// Informa que o estado solicitado não existe
 			}
 			break;										// Finaliza a execução do comando CS
@@ -632,12 +711,12 @@ void execute(Tokens in){ //Função execute
 					print(resposta);					// Envia o feedback visual para o terminal
 				}else{
 					snprintf(resposta, MAX_OUT,			// Erro se o valor inserido não for 0 nem 1
-							"\r\nERRO DE VALOR!");
+							"\r\nERRO DE VALOR!------------------------------------------------------");
 					print(resposta);
 				}
 			}else{
 				snprintf(resposta, MAX_OUT,				// Erro se o sistema estiver num estado em que não dê para usar EN
-						"\r\nESTADO ERRADO!");			// Impede uma ativação acidental de motores durante a configuração
+						"\r\nESTADO ERRADO!------------------------------------------------------");			// Impede uma ativação acidental de motores durante a configuração
 				print(resposta);
 			}
 			break;										// Finaliza a execução do comando EN
@@ -651,21 +730,39 @@ void execute(Tokens in){ //Função execute
 				if(in.data[1]<=1000){					// Valida se o período inserido é seguro (limite de 1000ms = 1 segundo)
 					__HAL_TIM_SET_AUTORELOAD(&htim6, (in.data[1]-1)?in.data[1]-1:999);
 					__HAL_TIM_SET_COUNTER(&htim6, 0);
+					h=in.data[1];
 				}else{
 					snprintf(resposta, MAX_OUT,			// Erro se o valor ultrapassar o limite definido por segurança
-							"\r\nERRO DE VALOR!");
+							"\r\nERRO DE VALOR!------------------------------------------------------");
 					print(resposta);
 				}
 			}else{
 				snprintf(resposta, MAX_OUT,				// Bloqueia a alteração do período se o motor já estiver em Manual ou Automático
-						"\r\nESTADO ERRADO!");
+						"\r\nESTADO ERRADO!------------------------------------------------------");
 				print(resposta);
 			}
 			break;										// Finaliza a execução do comando HW
 
 		case CMD_RT:									// Execução do comando RT (tipo de leitura)
+			char p[25];
+			switch(in.data[1]){
+			case 0:
+				strcpy(p, "posicao");
+				break;
+			case 1:
+				strcpy(p, "velocidade");
+				break;
+			case 2:
+				strcpy(p, "posicao e velocidade");
+				break;
+			default:
+				snprintf(resposta, MAX_OUT,			// Erro se o índice não for dos parâmetros disponíveis
+								"\r\nERRO DE VALOR!------------------------------------------------------");
+				print(resposta);
+				break;
+			}
 			snprintf(resposta, MAX_OUT,					// Prepara a string de resposta com o modo de leitura pretendido
-					"\r\nDefine o modo de leitura como %d", in.data[1]);
+					"\r\nDefine o modo de leitura como leitura de %s", p);
 			print(resposta);							// Envia confirmação para o terminal
 			int rt[]={1,-1,-1,-1};						// Define que este comando só é permitido no Estado 1 (Configuração)
 			if(!check_state(rt)){						// Verifica se o sistema está no estado de Configuração
@@ -673,27 +770,33 @@ void execute(Tokens in){ //Função execute
 					RT=in.data[1];						// Guarda o modo de leitura
 				}else{
 					snprintf(resposta, MAX_OUT,			// Erro se o modo de leitura for inexistente (>2)
-							"\r\nERRO DE VALOR!");
+							"\r\nERRO DE VALOR!------------------------------------------------------");
 					print(resposta);
 				}
 			}else{
 				snprintf(resposta, MAX_OUT,				// Impede a mudança de tipo de leitura fora do modo de configuração
-						"\r\nESTADO ERRADO!");
+						"\r\nESTADO ERRADO!------------------------------------------------------");
 				print(resposta);
 			}
 			break;										// Finaliza a execução do comando RT
 
 		case CMD_R:										// Execução do comando R
-			if(in.data[1]==2){
+			switch(in.data[1]){
+			case 0:
 				snprintf(resposta, MAX_OUT,					// Prepara a string confirmando os parâmetros de leitura recebidos
-						"\r\nDefine a leitura como %d com %d leituras", in.data[1], in.data[2]);
+								"\r\nPara a leitura");
 				print(resposta);							// Envia o feedback para o terminal série
-			}else{
+				break;
+			case 1:
 				snprintf(resposta, MAX_OUT,					// Prepara a string confirmando os parâmetros de leitura recebidos
-						"\r\nDefine a leitura como %d", in.data[1]);
+								"\r\nDefine a leitura como contínua");
+				print(resposta);							// Envia o feedback para o terminal série
+				break;
+			case 2:
+				snprintf(resposta, MAX_OUT,					// Prepara a string confirmando os parâmetros de leitura recebidos
+								"\r\nDefine a leitura como limitada com %d leituras", in.data[2]);
 				print(resposta);							// Envia o feedback para o terminal série
 			}
-
 			int r[]={2,-1,-1,-1};						// Define que a leitura manual só é permitida no Estado 2 (Manual)
 			if(!check_state(r)){						// Valida se o sistema se encontra no modo Manual
 				if(in.data[1]<=2){						// Verifica se o canal/tipo de leitura solicitado é válido (0, 1 ou 2)
@@ -701,19 +804,19 @@ void execute(Tokens in){ //Função execute
 					laps=in.data[2];					// Guarda-se o nº de voltas
 				}else{
 					snprintf(resposta, MAX_OUT,			// Mensagem de erro caso o parâmetro de canal seja inválido
-							"\r\nERRO DE VALOR!");
+							"\r\nERRO DE VALOR!------------------------------------------------------");
 					print(resposta);
 				}
 			}else{
 				snprintf(resposta, MAX_OUT,				// Bloqueia a leitura se o sistema estiver em Reset, Config ou Auto
-						"\r\nESTADO ERRADO!");
+						"\r\nESTADO ERRADO!------------------------------------------------------");
 				print(resposta);
 			}
 			break;										// Finaliza a execução do comando R
 
 		case CMD_PWM:									//Execução do comando PWM(Controlo da atuação)
 			snprintf(resposta, MAX_OUT,					// Mostra o valor do Duty Cycle (%) e o sentido (+ ou -) no terminal
-					"\r\nDefine o PWM como %d%% com o direcao %c", in.data[2],(in.data[1])?'+':'-');
+					"\r\nDefine o PWM como %c %d%%", (in.data[1])?'+':'-', in.data[2]);
 			print(resposta);
 			int pwm[]={1,2,-1,-1};						// Define que o ajuste do PWM só é válido nos estados 1 (Config) e 2 (Manual)
 			if(!check_state(pwm)){						// Verifica se estamos num dos dois estados definidos acima
@@ -739,12 +842,12 @@ void execute(Tokens in){ //Função execute
 					}
 				}else{
 					snprintf(resposta, MAX_OUT,			// Erro se o utilizador tentar definir mais de 100% de PWM
-							"\r\nERRO DE VALOR!");
+							"\r\nERRO DE VALOR!------------------------------------------------------");
 					print(resposta);
 				}
 			}else{
 				snprintf(resposta, MAX_OUT,				// Impede o controlo manual do PWM se o sistema estiver em Modo Automático (Estado 3)
-						"\r\nESTADO ERRADO!");
+						"\r\nESTADO ERRADO!------------------------------------------------------");
 				print(resposta);
 			}
 			break;										// Finaliza a execução do comando PWM
@@ -757,85 +860,156 @@ void execute(Tokens in){ //Função execute
 			if(!check_state(respos)){					// Verifica se o sistema está num dos estados autorizados
 				inc_pos=0;
 				inc_vel=0;
+				vol=0;
 			}else{
 				snprintf(resposta, MAX_OUT,				// Erro se o utilizador tentar dar reset durante o modo Automático
-						"\r\nESTADO ERRADO!");
+						"\r\nESTADO ERRADO!------------------------------------------------------");
 				print(resposta);
 			}
 			break;										// Finaliza a execução do comando RESPOS
 
 		case CMD_PID:									//Execução do comando PID(Configuração dos ganhos proporcional, integrativo e derivativo)
+			// O valor recebido (in.data[2]) está num ponto fixo (valor real * 100).
+			// Exemplo: se o utilizador enviou "03.40", o valor armazenado é 340
+			int numP = in.data[2];					// Armazena o valor bruto (ex: 340)
+			int uniP = numP / 100;					// Obtém a parte inteira (ex: 340 / 100 = 3)
+			int decP = abs(numP) % 100;					// Obtém a parte decimal (ex: 340 % 100 = 40)
 
-			// O valor recebido (in.data[2]) está num ponto fixo (valor real * 10).
-			// Exemplo: se o utilizador enviou "3.4", o valor armazenado é 34
-			uint32_t numP = in.data[2];					// Armazena o valor bruto (ex: 34)
-			uint32_t uniP = numP / 10;					// Obtém a parte inteira (ex: 34 / 10 = 3)
-			uint32_t decP = numP % 10;					// Obtém a parte decimal (ex: 34 % 10 = 4)
-
-			snprintf(resposta, MAX_OUT,					// Formata a resposta para mostrar o índice do ganho e o valor original com ponto (ex: 3.4)
-					"\r\nDefine o PID como %d e posicaoo %d.%d", in.data[1], uniP, decP);
-			print(resposta);							//Escrita da resposta
+			if(in.data[1]==5){
+				snprintf(resposta, MAX_OUT,					// Prepara a string confirmando os parâmetros de leitura recebidos
+						"\r\nImprime os valores do PID");
+				print(resposta);							// Envia o feedback para o terminal série
+			}else{
+				char p[5];
+				switch(in.data[1]){
+				case 0:
+					strcpy(p, "Yref");
+					break;
+				case 1:
+					strcpy(p, "Kp");
+					break;
+				case 2:
+					strcpy(p, "Ki");
+					break;
+				case 3:
+					strcpy(p, "Kd");
+					break;
+				case 4:
+					strcpy(p, "a");
+					break;
+				default:
+					snprintf(resposta, MAX_OUT,			// Erro se o índice não for dos parâmetros disponíveis
+									"\r\nERRO DE VALOR!------------------------------------------------------");
+					print(resposta);
+					break;
+				}
+				snprintf(resposta, MAX_OUT,					// Prepara a string confirmando os parâmetros de leitura recebidos
+						"\r\nDefine o parametro %s com o valor %.2d.%.2d", p, uniP, decP);
+				print(resposta);							// Envia o feedback para o terminal série
+			}
+//			snprintf(resposta, MAX_OUT,					// Formata a resposta para mostrar o índice do ganho e o valor original com ponto (ex: 3.4)
+//					"\r\nDefine o PID como %d e valor %d.%d", in.data[1], uniP, decP);
+//			print(resposta);							//Escrita da resposta
 
 			int pid[]={1,-1,-1,-1};						// A alteração de ganhos só é permitida no Estado 1 (Configuração)
 			if(!check_state(pid)){						// Garante a estabilidade do sistema impedindo alterações em pleno voo
 				if(abs(in.data[1])<=5){					// Valida o índice do parâmetro (ex: 0=Kp, 1=Ki, 2=Kd, etc.)
-					//EN = in.data[1];
+					float f=0.0;
+					if(numP<0){
+						f=uniP-0.01*decP;
+					}else{
+						f=uniP+0.01*decP;
+					}
+
+					switch(in.data[1]){
+					case 0:
+						yr = f;
+						break;
+					case 1:
+						Kp = f;
+						break;
+					case 2:
+						Ki = f;
+						break;
+					case 3:
+						Kd = f;
+						break;
+					case 4:
+						a = f;
+						break;
+					case 5:
+						snprintf(resposta, MAX_OUT,
+										"\r\nYref - %0.3f;"
+										"\r\nKp   - %0.3f"
+										"\r\nKi   - %0.3f"
+										"\r\nKd   - %0.3f"
+										"\r\na    - %0.3f", yr, Kp, Ki, Kd, a);
+						print(resposta);
+						break;
+					default:
+						snprintf(resposta, MAX_OUT,			// Erro se o índice não for dos parâmetros disponíveis
+										"\r\nERRO DE VALOR!------------------------------------------------------");
+						print(resposta);
+						break;
+					}
 				}else{
 					snprintf(resposta, MAX_OUT,			// Erro se o índice for maior que o número de parâmetros disponíveis
-							"\r\nERRO DE VALOR!");
+							"\r\nERRO DE VALOR!------------------------------------------------------");
 					print(resposta);
 				}
 			}else{
 				snprintf(resposta, MAX_OUT,				// Impede a configuração se o sistema estiver em Manual ou Automático
-						"\r\nESTADO ERRADO!");
+						"\r\nESTADO ERRADO!------------------------------------------------------");
 				print(resposta);
 			}
 			break;										// Finaliza a execução do comando PID
 
 		default:
-			print("\r\nERRO INTERNO!");						//Se não foi selecionado nenhum dos comandos
+			print("\r\nERRO INTERNO!------------------------------------------------------");						//Se não foi selecionado nenhum dos comandos
 			break;
 		}
 		break;
 
 	// Tratamento dos Erros da Análise Léxica/Sintática
 	case ERR:											//Erro genérico
-		print("\r\nERRO!");
+		print("\r\nERRO!------------------------------------------------------");
 		break;
 	case ERR_PAR:										//Erro de parâmetros
-		print("\r\nERRO DE PARAMETROS!");
+		print("\r\nERRO DE PARAMETROS!------------------------------------------------------");
 		break;
 	case ERR_CMD:										//Erro de comando
-		print("\r\nCOMANDO NAO RECONHECIDO!");
+		print("\r\nCOMANDO NAO RECONHECIDO!------------------------------------------------------");
 		break;
 	case ERR_OVR:										//Erro de overflow
-		print("\r\nOVERFLOW DE PARAMETROS!");
+		print("\r\nOVERFLOW DE PARAMETROS!------------------------------------------------------");
 		break;
 	default:											//Erro por defeito
-		print("\r\nERRO INTERNO!");
+		print("\r\nERRO INTERNO!------------------------------------------------------");
 		break;
 	}
 
 }
 //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-void read(int l){								// Leitura da posição e da velocidade
-	float PosRad = (inc_pos*(2.0*M_PI))/960.0;	// Conversão da posição para radianos
-	float PosGra = (inc_pos*360.0)/960.0;		// Conversão da posição para RPM
+void read(int l, int w){								// Leitura da posição e da velocidade
+	PosRad = (inc_pos*(2.0*M_PI))/960.0;	// Conversão da posição para radianos
+	PosGra = (inc_pos*360.0)/960.0;		// Conversão da posição para RPM
 
 	float pulse = (float)inc_vel/(__HAL_TIM_GET_AUTORELOAD(&htim6)/1000.0);
 	float VelRad = (pulse*(2.0*M_PI))/960.0;			// Conversão da velocidade em rad/s
 	float VelGra = (pulse*60.0)/960.0;					// Conversão da velocidade em rpm
 	inc_vel=0;
-	if(RT!=1){					// Leitura da posição
-		snprintf(resposta, MAX_OUT,
-					"\r\nPos: %0.3f rad | %0.3f deg %c %d voltas - [%d]\r\n", PosRad, PosGra, dir?'+':'-', vol, l);
-		print(resposta);
+	if(w){
+		if(RT!=1){					// Leitura da posição
+			snprintf(resposta, MAX_OUT,
+						"\r\nPos: %0.3f rad | %0.3f deg %c %d voltas - [%d]\r\n", PosRad, PosGra, dir?'+':'-', vol, l);
+			print(resposta);
+		}
+		if(RT!=0)				// Leitura da velocidade
+			snprintf(resposta, MAX_OUT,
+					"\r\nVel: %0.3f rad/s | %0.3f rpm %c %d voltas - [%d]\r\n", VelRad, VelGra, dir?'+':'-', vol, l);
+			print(resposta);
 	}
-	if(RT!=0)				// Leitura da velocidade
-		snprintf(resposta, MAX_OUT,
-				"\r\nVel: %0.3f rad/s | %0.3f rpm %c %d voltas - [%d]\r\n", VelRad, VelGra, dir?'+':'-', vol, l);
-		print(resposta);
 }
 //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -874,13 +1048,14 @@ int main_loop(void){
 		if(CS!=3){
 			switch(R){										//Casos de leitura
 			case 0:											//Ler só posição
+				read(l, 0);
 				break;
 			case 1:											//Ler só velocidade
-				read(l);
+				read(l, 1);
 				break;
 			case 2:											//Ler posição e velocidade
 				if(l++<laps){
-					read(l);
+					read(l, 1);
 				}else{
 					R=0;
 					l=0;
@@ -892,11 +1067,15 @@ int main_loop(void){
 				break;
 			}
 		}else{
-			if(point<50){
-				ISR_PID();
-				point++;
-			}
+			read(l, 0);
+			ISR_PID();
 		}
+			//if(point<50){
+		//if(CS==3)
+			//ISR_PID();
+				//point++;
+			//}
+		//}
 	}
 	if(lim){										//Se atingimos o limite de voltas
 		lim=0;
@@ -915,6 +1094,7 @@ void state_machine(){
 		//HW
 		__HAL_TIM_SET_AUTORELOAD(&htim6, 10-1);				//Período de 10ms
 		__HAL_TIM_SET_COUNTER(&htim6, 0);					//Reset do contador
+		h=0.01;
 		//RT
 		RT=1;												//Leitura de velocidade
 		//PWM
@@ -928,6 +1108,14 @@ void state_machine(){
 		print("\r\n\r\nCONFIG- - - - - - - - - - -");		//Confirmação do estado
 		print("\r\n[CONFIG]>");								//Prompt visual para o utilizador
 		enable(0);											//Desativação dos pinos de enable
+		y = 0.0;        // Variável medida (posição atual lida pelo encoder)
+		e = 0.0;        // Erro atual
+		e_ant = 0.0;    // Erro da iteração anterior
+		sum_e = 0.0;    // Somatório dos erros (para a ação integral)
+		y_ant = 0.0;    // Posição medida na iteração anterior
+		u_d = 0.0;      // Ação derivativa atual
+		u_d_ant = 0.0;  // Ação derivativa da iteração anterior
+		u = 0.0;        // Variável de comando a aplicar no PWM
 		while (CS==1){
 			if(main_loop()){
 			print("\r\n[CONFIG]>");							// Prompt visual para o utilizador
@@ -1140,7 +1328,7 @@ int arr = __HAL_TIM_GET_AUTORELOAD(&htim3);					//Valor do registo de Auto-Reloa
 				print(resposta);
         	}else{
         		snprintf(resposta, MAX_OUT,				// Impede o controlo manual do PWM se o sistema estiver em Modo Automático (Estado 3)
-        						"\r\nESTADO ERRADO!");
+        						"\r\nESTADO ERRADO!------------------------------------------------------");
         		print(resposta);
         	}
         }else if(rx_buff[0]=='/'){ //Se o utilizador escreveu /
@@ -1171,7 +1359,7 @@ int arr = __HAL_TIM_GET_AUTORELOAD(&htim3);					//Valor do registo de Auto-Reloa
 				print(resposta);
         	}else{
         		snprintf(resposta, MAX_OUT,				// Impede o controlo manual do PWM se o sistema estiver em Modo Automático (Estado 3)
-        						"\r\nESTADO ERRADO!");
+        						"\r\nESTADO ERRADO!------------------------------------------------------");
         		print(resposta);
         	}
         }else{
