@@ -201,42 +201,42 @@ Error validate(char par[], int digits, int type, int *out, int hex){ 		//Funçã
 			return ERR;												// Retorna erro se o parâmetro tiver mais do que um dígito
 			break;
 		case FLOAT:
-		    int uniF = 0;
-		    int decF = 0;
-		    int sign = 1;
-		    int startIdx = 0;
-		    int dotIdx = 2; // Default dot position for positive (XX.YY)
+		    int uniF = 0;										//Parte unitária do float
+		    int decF = 0;										//Parte decimal do float
+		    int sign = 1;										//Sinal do float (positivo por defeito)
+		    int startIdx = 0;									//O índice de começo do float é 0
+		    int dotIdx = 2; 									//Posição por defeito do ponto num float positivo (XX.YY)
 
-		    // 1. Handle Sign
-		    if (par[0] == '-') {
-		        sign = -1;
-		        startIdx = 1;
-		        dotIdx = 3; // Shift dot position for negative (-XX.YY)
+		    // 1. Manuseamento do sinal
+		    if (par[0] == '-') {								//Se o float é um número negativo
+		        sign = -1;										//O Sinal do float é negativo
+		        startIdx = 1;									//O índice de começo do float é 1
+		        dotIdx = 3; 									//Posição por defeito do ponto num float negativo (-XX.YY)
 		    }
 
-		    // 2. Validate Decimal Separator
+		    // 2. Validação do separador decimal
 		    if (par[dotIdx] != '.' && par[dotIdx] != ',') return ERR;
 
-		    // 3. Validate Digits
+		    // 3. Validação dos dígitos
 		    for (i = startIdx; i < digits; i++) {
-		        if (par[i] == '\0') break;
-		        if (i == dotIdx) continue; // Skip the dot/comma
+		        if (par[i] == '\0') break;			//Se não se escreveu nada
+		        if (i == dotIdx) continue; // Ignora o ponto/vírgula
 		        if (par[i] < '0' || par[i] > '9') return ERR;
 		    }
 
-		    // 4. Manual Conversion (Assuming format XX.YY or -XX.YY)
-		    if (sign == 1) {
+		    // 4. Conversão manual (Assumindo o formato XX.YY ou -XX.YY)
+		    if (sign == 1) {			//Se é XX.YY
 		        uniF = (par[0] - '0') * 10 + (par[1] - '0');
 		        decF = (par[3] - '0') * 10 + (par[4] - '0');
-		    } else {
+		    } else {					//Se é -XX.YY
 		        uniF = (par[1] - '0') * 10 + (par[2] - '0');
 		        decF = (par[4] - '0') * 10 + (par[5] - '0');
 		    }
 
-		    // 5. Combine and Apply Sign
-		    // Calculation: (Units * 100 + Decimals) * Sign
+		    // 5. Combinar tudo e aplicar o sinal
+		    // Cálculo: (parte unitária * 100 + parte decimal)* sinal
 		    num = (uniF * 100 + decF) * sign;
-		    *out = num;
+		    *out = num;							//O endereço da string de saída toma o valor de num
 		    break;
 //			int uniF;
 //			int decF;
@@ -420,9 +420,9 @@ Tokens identify(char *in[MAX_STRING], int count){								//Função de análise 
 
 	}else if (strcmp(in[0], "PID") == 0){										////Verificação se é o comando 'PID' (ajuste das variáveis e dos parâmetros do controlador PID)
 		out.data[0] = CMD_PID;													//Ativa o comando PID
-		if((count==3) || (count==2)){															// Espera 2 parâmetros (ex: PID 0 1.5 -> Kp=1.5)
-			char *digitStr = in[1];												// Primeiro parâmetro: �?ndice do ganho (0=P, 1=I, 2=D)
-			char *floatStr = in[2];												// Segundo parâmetro: Valor decimal do ganho
+		if((count==3) || (count==2)){											// Espera 2 parâmetros (ex: PID 1 1.5 -> Kp=1.5)
+			char *digitStr = in[1];												// Primeiro parâmetro: Índice a usar (p.e. 1=P, 2=I, 3=D)
+			char *floatStr = in[2];												// Segundo parâmetro: Valor definido para a posição desejada ou para os parâmetros do controlador PID
 
 			// Valida o índice como dígito (DIG) e o valor como número de vírgula flutuante (FLOAT)
 			if((validate(digitStr, 1, DIG, &(out.data[1]), 0))
@@ -485,28 +485,29 @@ Tokens parse(char in[MAX_CHAR], const char delim[MAX_DELIM]){		//Função de tok
 //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 float PosRad=0;
 float PosGra=0;
+
 // Variáveis de estado do sistema
 float yr = (2*M_PI);       // Variável de referência
-float y = 0.0;        // Variável medida (posição atual lida pelo encoder)
-float e = 0.0;        // Erro atual
-float e_ant = 0.0;    // Erro da iteração anterior
-float sum_e = 0.0;    // Somatório dos erros (para a ação integral)
-float y_ant = 0.0;    // Posição medida na iteração anterior
-float u_d = 0.0;      // Ação derivativa atual
-float u_d_ant = 0.0;  // Ação derivativa da iteração anterior
-float u = 0.0;        // Variável de comando a aplicar no PWM
+float y = 0.0;        		// Variável medida (posição atual lida pelo encoder)
+float e = 0.0;        		// Erro atual
+float e_ant = 0.0;    		// Erro da iteração anterior
+float sum_e = 0.0;    		// Somatório dos erros (para a ação integral)
+float y_ant = 0.0;    		// Posição medida na iteração anterior
+float u_d = 0.0;      		// Ação derivativa atual
+float u_d_ant = 0.0;  		// Ação derivativa da iteração anterior
+float u = 0.0;        		// Variável de comando a aplicar no PWM
 
-// Parâmetros do controlador (atualizados via interface)
-float h = 0.075;
-float a = 0;
-float Kp = 3.291140698;
-float Ki = 0.441805601;
-float Kd = 1.953626428;
+// Parâmetros do controlador (atualizados por interface)
+float h = 0.075;			// Período de amostragem
+float a = 0;				// Constante do filtro passa-baixo da derivada
+float Kp = 3.291140698;		// Ganho proporcional
+float Ki = 0.441805601;		// Ganho integral
+float Kd = 1.953626428;		// Ganho derivativo
 
-float Kp_h = 0;
-float Ki_h = 0;
-float Kd_h = 0;
-       // Constante do filtro passa-baixo da derivada
+float Kp_h = 0;				//Ganho proporcional no período de amostragem
+float Ki_h = 0;				//Ganho integral no período de amostragem
+float Kd_h = 0;				//Ganho derivativo no período de amostragem
+
 
 // Limites de saturação de tensão definidos no guião
 const float U_sat_a = 6.0;   // Saturação superior (6 V)
@@ -562,30 +563,32 @@ float ex[] = {		//saida filter
 	    1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5,
 	    -1.5, -1.5, -1.5, -1.5, -1.5
 	};*/
-void ISR_PID() {
+void ISR_PID() {							//Rotina de interrupção do controlador PID convencional
 	Kp_h = Kp;
 	Ki_h = Ki*h;
 	Kd_h = (Kd*(1-a))/h;
     float sum_e_backup = 0;
     //y = in[point];
-    y = PosRad+(vol*2*M_PI);
-    e = yr - y;
-    sum_e_backup = sum_e;
-    sum_e = sum_e + e_ant;
-    u_d = Kd_h * (y - y_ant) + a * u_d_ant;
-    u = Kp_h * e + Ki_h * sum_e - u_d;
-    e_ant = e;
-    y_ant = y;
-    u_d_ant = u_d;
-    if (u > U_sat_a) {
+    y = PosRad+(vol*2*M_PI);					//Obtenção do valor de y(k)
+    e = yr - y;									//Obtenção do valor de e(k)
+    sum_e_backup = sum_e;						//Em caso de u ficar saturado
+    sum_e = sum_e + e_ant;						//Atualização do somatório de erros usando o valor de e(k-1) guardado em e_ant
+    u_d = Kd_h * (y - y_ant) + a * u_d_ant;		//Calcula-se o valor de u_d
+    u = Kp_h * e + Ki_h * sum_e - u_d;			//Obtenção do valor de u(k), usando o valor de u_d
+    e_ant = e;									//Guarda-se o valor de e(k) em e_ant para utilização na invocação da rotina no instante k + 1
+    y_ant = y;									//Guarda-se o valor de y(k) em y_ant para utilização na invocação da rotina no instante k + 1
+    u_d_ant = u_d;								//Guarda-se o valor de u(k) em u_d_ant para utilização na invocação da rotina no instante k + 1
+
+    if (u > U_sat_a) {							//u tem sobre-saturação
         u = U_sat_a;
-        sum_e = sum_e_backup;
-    } else if (u < U_sat_b) {
+        sum_e = sum_e_backup;					//A soma dos erros é congelada (Usa-se a soma de backup) //Volta-se ao último valor
+
+    } else if (u < U_sat_b) {					//u tem sub-saturação
         u = U_sat_b;
-        sum_e = sum_e_backup;
+        sum_e = sum_e_backup;					//A soma dos erros é congelada (Usa-se a soma de backup)
     }
 
-    float out = (u*100)/6;
+    float out = (u*100)/6;						//Saída do valor do comando, para memória, um gerador de PWM. O valor não saturado u não muda
     if(R){
     	snprintf(resposta, MAX_OUT,
     					"\r\nIn - %0.3f; Out - %0.3f; PWM - %0.3f;", y, u, out);
@@ -744,7 +747,7 @@ void execute(Tokens in){ //Função execute
 			break;										// Finaliza a execução do comando HW
 
 		case CMD_RT:									// Execução do comando RT (tipo de leitura)
-			char p[25];
+			char p[25];									//Vetor de caracteres para o tipo de leitura a usar
 			switch(in.data[1]){
 			case 0:
 				strcpy(p, "posicao");
@@ -873,7 +876,7 @@ void execute(Tokens in){ //Função execute
 			// Exemplo: se o utilizador enviou "03.40", o valor armazenado é 340
 			int numP = in.data[2];					// Armazena o valor bruto (ex: 340)
 			int uniP = numP / 100;					// Obtém a parte inteira (ex: 340 / 100 = 3)
-			int decP = abs(numP) % 100;					// Obtém a parte decimal (ex: 340 % 100 = 40)
+			int decP = abs(numP) % 100;				// Obtém a parte decimal (ex: 340 % 100 = 4)
 
 			if(in.data[1]==5){
 				snprintf(resposta, MAX_OUT,					// Prepara a string confirmando os parâmetros de leitura recebidos
@@ -913,8 +916,8 @@ void execute(Tokens in){ //Função execute
 
 			int pid[]={1,-1,-1,-1};						// A alteração de ganhos só é permitida no Estado 1 (Configuração)
 			if(!check_state(pid)){						// Garante a estabilidade do sistema impedindo alterações em pleno voo
-				if(abs(in.data[1])<=5){					// Valida o índice do parâmetro (ex: 0=Kp, 1=Ki, 2=Kd, etc.)
-					float f=0.0;
+				if(abs(in.data[1])<=5){					// Valida o índice do parâmetro (ex: 1=Kp, 2=Ki, 3=Kd, etc.)
+					float f = 0.0;
 					if(numP<0){
 						f=uniP-0.01*decP;
 					}else{
@@ -992,8 +995,8 @@ void execute(Tokens in){ //Função execute
 //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 void read(int l, int w){								// Leitura da posição e da velocidade
-	PosRad = (inc_pos*(2.0*M_PI))/960.0;	// Conversão da posição para radianos
-	PosGra = (inc_pos*360.0)/960.0;		// Conversão da posição para RPM
+	PosRad = (inc_pos*(2.0*M_PI))/960.0;				// Conversão da posição para radianos
+	PosGra = (inc_pos*360.0)/960.0;						// Conversão da posição para RPM
 
 	float pulse = (float)inc_vel/(__HAL_TIM_GET_AUTORELOAD(&htim6)/1000.0);
 	float VelRad = (pulse*(2.0*M_PI))/960.0;			// Conversão da velocidade em rad/s
